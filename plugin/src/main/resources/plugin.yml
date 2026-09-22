@@ -9,12 +9,9 @@ author: Grate
 commands:
   case:
     description: Manage moderation cases
-    usage: /case <create|view|list|assign|note|evidence|status|resolve|close>
+    usage: /case <create|view|list>
 
 permissions:
-  casemanager.use:
-    description: Use CaseManager
-    default: op
 
   casemanager.create:
     description: Create moderation cases
@@ -24,6 +21,10 @@ permissions:
     description: View moderation cases
     default: op
 
-  casemanager.manage:
-    description: Manage moderation cases
+  casemanager.list:
+    description: List moderation cases
+    default: op
+
+  casemanager.use:
+    description: Use CaseManager
     default: op
