@@ -1,5 +1,6 @@
 package me.grate.casemanager;
 
+import me.grate.casemanager.casefile.CaseNoteService;
 import me.grate.casemanager.casefile.CaseService;
 import me.grate.casemanager.casefile.CaseTimelineService;
 import me.grate.casemanager.command.CaseCommand;
@@ -12,8 +13,10 @@ public final class CaseManager extends JavaPlugin {
     private static CaseManager instance;
 
     private DatabaseManager databaseManager;
+
     private CaseService caseService;
     private CaseTimelineService caseTimelineService;
+    private CaseNoteService caseNoteService;
 
     @Override
     public void onEnable() {
@@ -22,9 +25,12 @@ public final class CaseManager extends JavaPlugin {
 
         saveDefaultConfig();
 
-        getLogger().info("CaseManager is starting...");
+        getLogger().info(
+                "CaseManager is starting..."
+        );
 
-        databaseManager = new DatabaseManager(this);
+        databaseManager =
+                new DatabaseManager(this);
 
         try {
 
@@ -38,6 +44,12 @@ public final class CaseManager extends JavaPlugin {
             caseTimelineService =
                     new CaseTimelineService(
                             databaseManager
+                    );
+
+            caseNoteService =
+                    new CaseNoteService(
+                            databaseManager,
+                            caseTimelineService
                     );
 
             caseService =
@@ -114,5 +126,9 @@ public final class CaseManager extends JavaPlugin {
 
     public CaseTimelineService getCaseTimelineService() {
         return caseTimelineService;
+    }
+
+    public CaseNoteService getCaseNoteService() {
+        return caseNoteService;
     }
 }
