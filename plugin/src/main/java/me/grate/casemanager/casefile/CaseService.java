@@ -27,30 +27,69 @@ public final class CaseService {
             String creatorName,
             String reason
     ) {
+
         return CompletableFuture.supplyAsync(() -> {
 
             String sql = """
                     INSERT INTO cases
-                    (target_uuid, target_name, creator_uuid, creator_name, reason, status)
+                    (
+                        target_uuid,
+                        target_name,
+                        creator_uuid,
+                        creator_name,
+                        reason,
+                        status
+                    )
                     VALUES (?, ?, ?, ?, ?, ?)
                     """;
 
-            try (Connection connection = database.getConnection();
-                 PreparedStatement statement = connection.prepareStatement(
-                         sql,
-                         java.sql.Statement.RETURN_GENERATED_KEYS
-                 )) {
+            try (
+                    Connection connection =
+                            database.getConnection();
 
-                statement.setString(1, targetUuid.toString());
-                statement.setString(2, targetName);
-                statement.setString(3, creatorUuid.toString());
-                statement.setString(4, creatorName);
-                statement.setString(5, reason);
-                statement.setString(6, CaseStatus.OPEN.name());
+                    PreparedStatement statement =
+                            connection.prepareStatement(
+                                    sql,
+                                    java.sql.Statement.RETURN_GENERATED_KEYS
+                            )
+            ) {
+
+                statement.setString(
+                        1,
+                        targetUuid.toString()
+                );
+
+                statement.setString(
+                        2,
+                        targetName
+                );
+
+                statement.setString(
+                        3,
+                        creatorUuid.toString()
+                );
+
+                statement.setString(
+                        4,
+                        creatorName
+                );
+
+                statement.setString(
+                        5,
+                        reason
+                );
+
+                statement.setString(
+                        6,
+                        CaseStatus.OPEN.name()
+                );
 
                 statement.executeUpdate();
 
-                try (ResultSet keys = statement.getGeneratedKeys()) {
+                try (
+                        ResultSet keys =
+                                statement.getGeneratedKeys()
+                ) {
 
                     if (!keys.next()) {
                         throw new SQLException(
@@ -58,8 +97,11 @@ public final class CaseService {
                         );
                     }
 
-                    long caseId = keys.getLong(1);
-                    Instant now = Instant.now();
+                    long caseId =
+                            keys.getLong(1);
+
+                    Instant now =
+                            Instant.now();
 
                     return new Case(
                             caseId,
@@ -75,6 +117,7 @@ public final class CaseService {
                 }
 
             } catch (SQLException exception) {
+
                 throw new RuntimeException(
                         "Failed to create case.",
                         exception
@@ -83,7 +126,10 @@ public final class CaseService {
         });
     }
 
-    public CompletableFuture<Case> getCase(long caseId) {
+    public CompletableFuture<Case> getCase(
+            long caseId
+    ) {
+
         return CompletableFuture.supplyAsync(() -> {
 
             String sql = """
@@ -101,12 +147,23 @@ public final class CaseService {
                     WHERE id = ?
                     """;
 
-            try (Connection connection = database.getConnection();
-                 PreparedStatement statement = connection.prepareStatement(sql)) {
+            try (
+                    Connection connection =
+                            database.getConnection();
 
-                statement.setLong(1, caseId);
+                    PreparedStatement statement =
+                            connection.prepareStatement(sql)
+            ) {
 
-                try (ResultSet result = statement.executeQuery()) {
+                statement.setLong(
+                        1,
+                        caseId
+                );
+
+                try (
+                        ResultSet result =
+                                statement.executeQuery()
+                ) {
 
                     if (!result.next()) {
                         return null;
@@ -116,6 +173,7 @@ public final class CaseService {
                 }
 
             } catch (SQLException exception) {
+
                 throw new RuntimeException(
                         "Failed to retrieve case #" + caseId,
                         exception
@@ -124,7 +182,10 @@ public final class CaseService {
         });
     }
 
-    public CompletableFuture<List<Case>> getCases(int limit) {
+    public CompletableFuture<List<Case>> getCases(
+            int limit
+    ) {
+
         return CompletableFuture.supplyAsync(() -> {
 
             String sql = """
@@ -143,23 +204,38 @@ public final class CaseService {
                     LIMIT ?
                     """;
 
-            List<Case> cases = new ArrayList<>();
+            List<Case> cases =
+                    new ArrayList<>();
 
-            try (Connection connection = database.getConnection();
-                 PreparedStatement statement = connection.prepareStatement(sql)) {
+            try (
+                    Connection connection =
+                            database.getConnection();
 
-                statement.setInt(1, limit);
+                    PreparedStatement statement =
+                            connection.prepareStatement(sql)
+            ) {
 
-                try (ResultSet result = statement.executeQuery()) {
+                statement.setInt(
+                        1,
+                        limit
+                );
+
+                try (
+                        ResultSet result =
+                                statement.executeQuery()
+                ) {
 
                     while (result.next()) {
-                        cases.add(mapCase(result));
+                        cases.add(
+                                mapCase(result)
+                        );
                     }
                 }
 
                 return cases;
 
             } catch (SQLException exception) {
+
                 throw new RuntimeException(
                         "Failed to retrieve cases.",
                         exception
@@ -168,26 +244,40 @@ public final class CaseService {
         });
     }
 
-    private Case mapCase(ResultSet result) throws SQLException {
+    private Case mapCase(
+            ResultSet result
+    ) throws SQLException {
 
         UUID targetUuid =
-                UUID.fromString(result.getString("target_uuid"));
+                UUID.fromString(
+                        result.getString(
+                                "target_uuid"
+                        )
+                );
 
         UUID creatorUuid =
-                UUID.fromString(result.getString("creator_uuid"));
+                UUID.fromString(
+                        result.getString(
+                                "creator_uuid"
+                        )
+                );
 
         CaseStatus status =
                 CaseStatus.valueOf(
-                        result.getString("status")
+                        result.getString(
+                                "status"
+                        )
                 );
 
         Instant createdAt =
-                result.getTimestamp("created_at")
-                        .toInstant();
+                result.getTimestamp(
+                        "created_at"
+                ).toInstant();
 
         Instant updatedAt =
-                result.getTimestamp("updated_at")
-                        .toInstant();
+                result.getTimestamp(
+                        "updated_at"
+                ).toInstant();
 
         return new Case(
                 result.getLong("id"),
