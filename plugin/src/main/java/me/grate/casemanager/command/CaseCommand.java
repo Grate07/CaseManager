@@ -3,6 +3,7 @@ package me.grate.casemanager.command;
 import me.grate.casemanager.CaseManager;
 import me.grate.casemanager.casefile.Case;
 import me.grate.casemanager.casefile.CaseService;
+import me.grate.casemanager.casefile.CaseTimelineEntry;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
@@ -46,6 +47,8 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             case "view" -> handleView(sender, args);
 
             case "list" -> handleList(sender, args);
+
+            case "timeline" -> handleTimeline(sender, args);
 
             default -> sendHelp(sender);
         }
@@ -341,7 +344,86 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                 });
     }
 
-    private void sendCaseCreated(
+    private void handleTimeline(
+            CommandSender sender,
+            String[] args
+    ) {
+
+        if (!sender.hasPermission("casemanager.view")) {
+            sendNoPermission(sender);
+            return;
+        }
+
+        if (args.length < 2) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Usage: /case timeline <id>"
+            );
+            return;
+        }
+
+        long caseId;
+
+        try {
+            caseId = Long.parseLong(args[1]);
+        } catch (NumberFormatException exception) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Case ID must be a number."
+            );
+            return;
+        }
+
+        if (caseId <= 0) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Invalid case ID."
+            );
+            return;
+        }
+
+        sender.sendMessage(
+                ChatColor.GRAY +
+                        "Loading timeline for case #" +
+                        caseId +
+                        "..."
+        );
+
+        plugin.getCaseTimelineService()
+                .getTimeline(caseId)
+                .thenAccept(entries -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> sendTimeline(
+                                    sender,
+                                    caseId,
+                                    entries
+                            )
+                    );
+
+                })
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> sender.sendMessage(
+                                    ChatColor.RED +
+                                            "Failed to load the case timeline."
+                            )
+                    );
+
+                    plugin.getLogger().severe(
+                            "Failed to load timeline for case #" +
+                                    caseId
+                    );
+
+                    exception.printStackTrace();
+
+                    return null;
+                });
+                        }
+        private void sendCaseCreated(
             CommandSender sender,
             Case caseFile
     ) {
@@ -540,7 +622,85 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("");
     }
 
-    private void sendHelp(CommandSender sender) {
+    private void sendTimeline(
+            CommandSender sender,
+            long caseId,
+            List<CaseTimelineEntry> entries
+    ) {
+
+        sender.sendMessage("");
+
+        sender.sendMessage(
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
+        );
+
+        sender.sendMessage(
+                ChatColor.DARK_AQUA +
+                        "CASE #" +
+                        caseId +
+                        " TIMELINE"
+        );
+
+        sender.sendMessage("");
+
+        if (entries.isEmpty()) {
+
+            sender.sendMessage(
+                    ChatColor.GRAY +
+                            "No timeline entries found."
+            );
+
+        } else {
+
+            for (CaseTimelineEntry entry : entries) {
+
+                String actor =
+                        entry.getActorName() == null
+                                ? "System"
+                                : entry.getActorName();
+
+                sender.sendMessage(
+                        ChatColor.DARK_GRAY +
+                                "[" +
+                                entry.getCreatedAt() +
+                                "]"
+                );
+
+                sender.sendMessage(
+                        ChatColor.GRAY +
+                                actor +
+                                ChatColor.DARK_GRAY +
+                                " → " +
+                                ChatColor.WHITE +
+                                entry.getAction()
+                );
+
+                if (entry.getDetails() != null &&
+                        !entry.getDetails().isBlank()) {
+
+                    sender.sendMessage(
+                            ChatColor.GRAY +
+                                    "  " +
+                                    entry.getDetails()
+                    );
+                }
+
+                sender.sendMessage("");
+            }
+        }
+
+        sender.sendMessage(
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
+        );
+
+        sender.sendMessage("");
+    }
+
+    private void sendHelp(
+            CommandSender sender
+    ) {
 
         sender.sendMessage("");
 
@@ -562,6 +722,11 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(
                 ChatColor.GRAY +
                         "/case list [limit]"
+        );
+
+        sender.sendMessage(
+                ChatColor.GRAY +
+                        "/case timeline <id>"
         );
 
         sender.sendMessage("");
@@ -600,6 +765,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                     "casemanager.view"
             )) {
                 suggestions.add("view");
+                suggestions.add("timeline");
             }
 
             if (sender.hasPermission(
@@ -673,4 +839,4 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                 .sorted()
                 .toList();
     }
-                            }
+            }
