@@ -1,5 +1,6 @@
 package me.grate.casemanager;
 
+import me.grate.casemanager.casefile.CaseService;
 import me.grate.casemanager.database.DatabaseManager;
 import me.grate.casemanager.database.DatabaseTables;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -9,6 +10,7 @@ public final class CaseManager extends JavaPlugin {
     private static CaseManager instance;
 
     private DatabaseManager databaseManager;
+    private CaseService caseService;
 
     @Override
     public void onEnable() {
@@ -23,8 +25,11 @@ public final class CaseManager extends JavaPlugin {
         try {
             databaseManager.connect();
             DatabaseTables.createTables(this, databaseManager);
+
+            caseService = new CaseService(databaseManager);
+
         } catch (Exception exception) {
-            getLogger().severe("Unable to connect to MySQL.");
+            getLogger().severe("Unable to initialize the database.");
             exception.printStackTrace();
 
             getServer().getPluginManager().disablePlugin(this);
@@ -36,7 +41,6 @@ public final class CaseManager extends JavaPlugin {
 
     @Override
     public void onDisable() {
-
         if (databaseManager != null) {
             databaseManager.close();
         }
@@ -50,5 +54,9 @@ public final class CaseManager extends JavaPlugin {
 
     public DatabaseManager getDatabaseManager() {
         return databaseManager;
+    }
+
+    public CaseService getCaseService() {
+        return caseService;
     }
 }
