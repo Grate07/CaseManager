@@ -1,0 +1,10 @@
+database:
+  host: "localhost"
+  port: 3306
+  name: "casemanager"
+  username: "root"
+  password: "CHANGE_ME"
+
+  pool-size: 10
+
+  ssl: false
