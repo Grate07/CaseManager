@@ -1,0 +1,29 @@
+name: CaseManager
+version: 1.0.0
+main: me.grate.casemanager.CaseManager
+api-version: '1.21'
+
+description: Advanced moderation case management system.
+author: Grate
+
+commands:
+  case:
+    description: Manage moderation cases
+    usage: /case <create|view|list|assign|note|evidence|status|resolve|close>
+
+permissions:
+  casemanager.use:
+    description: Use CaseManager
+    default: op
+
+  casemanager.create:
+    description: Create moderation cases
+    default: op
+
+  casemanager.view:
+    description: View moderation cases
+    default: op
+
+  casemanager.manage:
+    description: Manage moderation cases
+    default: op
