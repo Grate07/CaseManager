@@ -35,13 +35,15 @@ public final class CaseManager extends JavaPlugin {
                     databaseManager
             );
 
-            caseService = new CaseService(
-                    databaseManager
-            );
-
             caseTimelineService =
                     new CaseTimelineService(
                             databaseManager
+                    );
+
+            caseService =
+                    new CaseService(
+                            databaseManager,
+                            caseTimelineService
                     );
 
         } catch (Exception exception) {
