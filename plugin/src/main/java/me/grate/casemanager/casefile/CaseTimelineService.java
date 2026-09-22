@@ -42,20 +42,45 @@ public final class CaseTimelineService {
                     VALUES (?, ?, ?, ?, ?)
                     """;
 
-            try (Connection connection = database.getConnection();
-                 PreparedStatement statement =
-                         connection.prepareStatement(sql)) {
+            try (
+                    Connection connection =
+                            database.getConnection();
 
-                statement.setLong(1, caseId);
-                statement.setString(
-                        2,
-                        actorUuid == null
-                                ? null
-                                : actorUuid.toString()
+                    PreparedStatement statement =
+                            connection.prepareStatement(sql)
+            ) {
+
+                statement.setLong(
+                        1,
+                        caseId
                 );
-                statement.setString(3, actorName);
-                statement.setString(4, action);
-                statement.setString(5, details);
+
+                if (actorUuid == null) {
+                    statement.setNull(
+                            2,
+                            java.sql.Types.VARCHAR
+                    );
+                } else {
+                    statement.setString(
+                            2,
+                            actorUuid.toString()
+                    );
+                }
+
+                statement.setString(
+                        3,
+                        actorName
+                );
+
+                statement.setString(
+                        4,
+                        action
+                );
+
+                statement.setString(
+                        5,
+                        details
+                );
 
                 statement.executeUpdate();
 
@@ -92,19 +117,30 @@ public final class CaseTimelineService {
             List<CaseTimelineEntry> entries =
                     new ArrayList<>();
 
-            try (Connection connection = database.getConnection();
-                 PreparedStatement statement =
-                         connection.prepareStatement(sql)) {
+            try (
+                    Connection connection =
+                            database.getConnection();
 
-                statement.setLong(1, caseId);
+                    PreparedStatement statement =
+                            connection.prepareStatement(sql)
+            ) {
 
-                try (ResultSet result =
-                             statement.executeQuery()) {
+                statement.setLong(
+                        1,
+                        caseId
+                );
+
+                try (
+                        ResultSet result =
+                                statement.executeQuery()
+                ) {
 
                     while (result.next()) {
 
                         String actorUuidString =
-                                result.getString("actor_uuid");
+                                result.getString(
+                                        "actor_uuid"
+                                );
 
                         UUID actorUuid =
                                 actorUuidString == null
@@ -118,7 +154,7 @@ public final class CaseTimelineService {
                                         "created_at"
                                 ).toInstant();
 
-                        entries.add(
+                        CaseTimelineEntry entry =
                                 new CaseTimelineEntry(
                                         result.getLong("id"),
                                         result.getLong("case_id"),
@@ -133,8 +169,9 @@ public final class CaseTimelineService {
                                                 "details"
                                         ),
                                         createdAt
-                                )
-                        );
+                                );
+
+                        entries.add(entry);
                     }
                 }
 
