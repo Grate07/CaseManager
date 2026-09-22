@@ -15,9 +15,14 @@ import java.util.concurrent.CompletableFuture;
 public final class CaseService {
 
     private final DatabaseManager database;
+    private final CaseTimelineService timelineService;
 
-    public CaseService(DatabaseManager database) {
+    public CaseService(
+            DatabaseManager database,
+            CaseTimelineService timelineService
+    ) {
         this.database = database;
+        this.timelineService = timelineService;
     }
 
     public CompletableFuture<Case> createCase(
@@ -103,17 +108,31 @@ public final class CaseService {
                     Instant now =
                             Instant.now();
 
-                    return new Case(
+                    Case caseFile =
+                            new Case(
+                                    caseId,
+                                    targetUuid,
+                                    targetName,
+                                    creatorUuid,
+                                    creatorName,
+                                    reason,
+                                    CaseStatus.OPEN,
+                                    now,
+                                    now
+                            );
+
+                    /*
+                     * Record the first audit event.
+                     */
+                    timelineService.addEntry(
                             caseId,
-                            targetUuid,
-                            targetName,
                             creatorUuid,
                             creatorName,
-                            reason,
-                            CaseStatus.OPEN,
-                            now,
-                            now
-                    );
+                            "CASE_CREATED",
+                            "Case created."
+                    ).join();
+
+                    return caseFile;
                 }
 
             } catch (SQLException exception) {
