@@ -1,6 +1,7 @@
 package me.grate.casemanager;
 
 import me.grate.casemanager.casefile.CaseService;
+import me.grate.casemanager.casefile.CaseTimelineService;
 import me.grate.casemanager.command.CaseCommand;
 import me.grate.casemanager.database.DatabaseManager;
 import me.grate.casemanager.database.DatabaseTables;
@@ -12,6 +13,7 @@ public final class CaseManager extends JavaPlugin {
 
     private DatabaseManager databaseManager;
     private CaseService caseService;
+    private CaseTimelineService caseTimelineService;
 
     @Override
     public void onEnable() {
@@ -37,6 +39,11 @@ public final class CaseManager extends JavaPlugin {
                     databaseManager
             );
 
+            caseTimelineService =
+                    new CaseTimelineService(
+                            databaseManager
+                    );
+
         } catch (Exception exception) {
 
             getLogger().severe(
@@ -55,15 +62,7 @@ public final class CaseManager extends JavaPlugin {
         CaseCommand caseCommand =
                 new CaseCommand(this);
 
-        if (getCommand("case") != null) {
-
-            getCommand("case")
-                    .setExecutor(caseCommand);
-
-            getCommand("case")
-                    .setTabCompleter(caseCommand);
-
-        } else {
+        if (getCommand("case") == null) {
 
             getLogger().severe(
                     "The /case command is missing from plugin.yml!"
@@ -75,6 +74,12 @@ public final class CaseManager extends JavaPlugin {
 
             return;
         }
+
+        getCommand("case")
+                .setExecutor(caseCommand);
+
+        getCommand("case")
+                .setTabCompleter(caseCommand);
 
         getLogger().info(
                 "CaseManager enabled!"
@@ -103,5 +108,9 @@ public final class CaseManager extends JavaPlugin {
 
     public CaseService getCaseService() {
         return caseService;
+    }
+
+    public CaseTimelineService getCaseTimelineService() {
+        return caseTimelineService;
     }
 }
