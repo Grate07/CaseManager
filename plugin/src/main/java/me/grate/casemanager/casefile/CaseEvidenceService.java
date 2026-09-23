@@ -1,484 +1,331 @@
-package me.grate.casemanager.integration;
+package me.grate.casemanager.casefile;
 
-import me.grate.casemanager.CaseManager;
-import me.grate.casemanager.casefile.CaseEvidenceService;
+import me.grate.casemanager.database.DatabaseManager;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-public final class EvidenceIntegrationService {
+public final class CaseEvidenceService {
 
-    private final CaseManager plugin;
-    private final IntegrationManager integrationManager;
-    private final CaseEvidenceService evidenceService;
+    private final DatabaseManager database;
+    private final CaseTimelineService timelineService;
 
-    public EvidenceIntegrationService(
-            CaseManager plugin,
-            IntegrationManager integrationManager,
-            CaseEvidenceService evidenceService
+    public CaseEvidenceService(
+            DatabaseManager database,
+            CaseTimelineService timelineService
     ) {
-        this.plugin = plugin;
-        this.integrationManager = integrationManager;
-        this.evidenceService = evidenceService;
+        this.database = database;
+        this.timelineService = timelineService;
     }
 
-    public CompletableFuture<Boolean> collectCoreProtectEvidence(
+    public CompletableFuture<CaseEvidence> addEvidence(
             long caseId,
-            UUID targetUuid,
-            String targetName,
-            int timeSeconds,
-            int limit,
             UUID addedByUuid,
-            String addedByName
+            String addedByName,
+            String type,
+            String content
     ) {
 
-        if (!integrationManager.isCoreProtectAvailable()) {
-            return CompletableFuture.completedFuture(false);
+        if (caseId <= 0) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
         }
 
-        if (caseId <= 0 ||
-                targetName == null ||
-                targetName.isBlank() ||
-                addedByUuid == null) {
+        if (addedByUuid == null) {
 
-            return CompletableFuture.completedFuture(false);
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Evidence author UUID cannot be null."
+                    )
+            );
         }
 
-        if (timeSeconds <= 0 ||
-                limit <= 0) {
+        if (type == null ||
+                type.isBlank()) {
 
-            return CompletableFuture.completedFuture(false);
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Evidence type cannot be empty."
+                    )
+            );
         }
 
-        CoreProtectIntegration coreProtect =
-                integrationManager.getCoreProtect();
+        if (content == null ||
+                content.isBlank()) {
 
-        if (coreProtect == null) {
-            return CompletableFuture.completedFuture(false);
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Evidence content cannot be empty."
+                    )
+            );
         }
 
-        return coreProtect
-                .lookupPlayerHistory(
-                        targetName,
-                        timeSeconds,
-                        limit
-                )
-                .thenCompose(records -> {
+        return CompletableFuture.supplyAsync(() -> {
 
-                    if (records == null ||
-                            records.isEmpty()) {
+            String sql = """
+                    INSERT INTO case_evidence
+                    (
+                        case_id,
+                        added_by_uuid,
+                        added_by_name,
+                        type,
+                        content
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """;
 
-                        return CompletableFuture.completedFuture(
-                                false
+            try (
+                    Connection connection =
+                            database.getConnection();
+
+                    PreparedStatement statement =
+                            connection.prepareStatement(
+                                    sql,
+                                    java.sql.Statement.RETURN_GENERATED_KEYS
+                            )
+            ) {
+
+                statement.setLong(
+                        1,
+                        caseId
+                );
+
+                statement.setString(
+                        2,
+                        addedByUuid.toString()
+                );
+
+                statement.setString(
+                        3,
+                        addedByName
+                );
+
+                statement.setString(
+                        4,
+                        type
+                );
+
+                statement.setString(
+                        5,
+                        content
+                );
+
+                int affected =
+                        statement.executeUpdate();
+
+                if (affected != 1) {
+
+                    throw new SQLException(
+                            "Evidence insert affected " +
+                                    affected +
+                                    " rows."
+                    );
+                }
+
+                long evidenceId;
+
+                try (
+                        ResultSet keys =
+                                statement.getGeneratedKeys()
+                ) {
+
+                    if (!keys.next()) {
+
+                        throw new SQLException(
+                                "Failed to retrieve generated evidence ID."
                         );
                     }
 
-                    return addCoreProtectRecords(
-                            caseId,
-                            records,
-                            addedByUuid,
-                            addedByName
-                    );
-                })
-                .exceptionally(exception -> {
+                    evidenceId =
+                            keys.getLong(1);
+                }
 
-                    plugin.getLogger().warning(
-                            "Failed to collect CoreProtect evidence: " +
-                                    getRootMessage(exception)
-                    );
+                Instant createdAt =
+                        Instant.now();
 
-                    return false;
-                });
-    }
-
-    private CompletableFuture<Boolean> addCoreProtectRecords(
-            long caseId,
-            List<CoreProtectIntegration.CoreProtectRecord> records,
-            UUID addedByUuid,
-            String addedByName
-    ) {
-
-        CompletableFuture<Boolean> future =
-                CompletableFuture.completedFuture(false);
-
-        for (
-                CoreProtectIntegration.CoreProtectRecord record :
-                records
-        ) {
-
-            if (record == null) {
-                continue;
-            }
-
-            future =
-                    future.thenCompose(
-                            alreadyAdded ->
-                                    addEvidence(
-                                            caseId,
-                                            "COREPROTECT",
-                                            record.toEvidenceText(),
-                                            addedByUuid,
-                                            addedByName
-                                    ).thenApply(
-                                            added ->
-                                                    alreadyAdded || added
-                                    )
-                    );
-        }
-
-        return future;
-    }
-
-    public CompletableFuture<Boolean> collectLiteBansEvidence(
-            long caseId,
-            UUID targetUuid,
-            String targetName,
-            int limit,
-            UUID addedByUuid,
-            String addedByName
-    ) {
-
-        if (!integrationManager.isLiteBansAvailable()) {
-            return CompletableFuture.completedFuture(false);
-        }
-
-        if (caseId <= 0 ||
-                targetUuid == null ||
-                addedByUuid == null ||
-                limit <= 0) {
-
-            return CompletableFuture.completedFuture(false);
-        }
-
-        LiteBansIntegration liteBans =
-                integrationManager.getLiteBans();
-
-        if (liteBans == null) {
-            return CompletableFuture.completedFuture(false);
-        }
-
-        return CompletableFuture.supplyAsync(
-                () ->
-                        liteBans.getPunishmentHistory(
-                                targetUuid,
-                                limit
-                        )
-        ).thenCompose(history -> {
-
-            if (history == null ||
-                    history.isEmpty()) {
-
-                return CompletableFuture.completedFuture(
-                        false
-                );
-            }
-
-            return addLiteBansRecords(
-                    caseId,
-                    history,
-                    addedByUuid,
-                    addedByName
-            );
-
-        }).exceptionally(exception -> {
-
-            plugin.getLogger().warning(
-                    "Failed to collect LiteBans evidence: " +
-                            getRootMessage(exception)
-            );
-
-            return false;
-        });
-    }
-
-    private CompletableFuture<Boolean> addLiteBansRecords(
-            long caseId,
-            List<LiteBansIntegration.LiteBansPunishment> records,
-            UUID addedByUuid,
-            String addedByName
-    ) {
-
-        CompletableFuture<Boolean> future =
-                CompletableFuture.completedFuture(false);
-
-        for (
-                LiteBansIntegration.LiteBansPunishment record :
-                records
-        ) {
-
-            if (record == null) {
-                continue;
-            }
-
-            future =
-                    future.thenCompose(
-                            alreadyAdded ->
-                                    addEvidence(
-                                            caseId,
-                                            "LITEBANS",
-                                            record.toEvidenceText(),
-                                            addedByUuid,
-                                            addedByName
-                                    ).thenApply(
-                                            added ->
-                                                    alreadyAdded || added
-                                    )
-                    );
-        }
-
-        return future;
-    }
-
-    public CompletableFuture<Boolean> collectVulcanEvidence(
-            long caseId,
-            UUID targetUuid,
-            String targetName,
-            UUID addedByUuid,
-            String addedByName
-    ) {
-
-        if (!integrationManager.isVulcanAvailable()) {
-            return CompletableFuture.completedFuture(false);
-        }
-
-        if (caseId <= 0 ||
-                targetUuid == null ||
-                addedByUuid == null) {
-
-            return CompletableFuture.completedFuture(false);
-        }
-
-        VulcanIntegration vulcan =
-                integrationManager.getVulcan();
-
-        if (vulcan == null) {
-            return CompletableFuture.completedFuture(false);
-        }
-
-        return CompletableFuture.supplyAsync(
-                () ->
-                        vulcan.createEvidenceSummary(
-                                targetUuid,
-                                targetName
-                        )
-        ).thenCompose(summary -> {
-
-            if (summary == null ||
-                    summary.isBlank()) {
-
-                return CompletableFuture.completedFuture(
-                        false
-                );
-            }
-
-            return addEvidence(
-                    caseId,
-                    "ANTI_CHEAT",
-                    summary,
-                    addedByUuid,
-                    addedByName
-            );
-
-        }).exceptionally(exception -> {
-
-            plugin.getLogger().warning(
-                    "Failed to collect Vulcan evidence: " +
-                            getRootMessage(exception)
-            );
-
-            return false;
-        });
-    }
-
-    public CompletableFuture<Boolean> collectAllEvidence(
-            long caseId,
-            UUID targetUuid,
-            String targetName,
-            int coreProtectTimeSeconds,
-            int coreProtectLimit,
-            int punishmentLimit,
-            UUID addedByUuid,
-            String addedByName
-    ) {
-
-        /*
-         * Keep collecting even if one integration is unavailable
-         * or fails. One integration must never prevent another
-         * available integration from being collected.
-         */
-        return collectCoreProtectEvidence(
-                caseId,
-                targetUuid,
-                targetName,
-                coreProtectTimeSeconds,
-                coreProtectLimit,
-                addedByUuid,
-                addedByName
-        ).exceptionally(
-                exception -> false
-        ).thenCompose(coreProtectSuccess ->
-                collectLiteBansEvidence(
-                        caseId,
-                        targetUuid,
-                        targetName,
-                        punishmentLimit,
-                        addedByUuid,
-                        addedByName
-                ).exceptionally(
-                        exception -> false
-                ).thenCompose(liteBansSuccess ->
-                        collectVulcanEvidence(
+                CaseEvidence evidence =
+                        new CaseEvidence(
+                                evidenceId,
                                 caseId,
-                                targetUuid,
-                                targetName,
                                 addedByUuid,
-                                addedByName
-                        ).exceptionally(
-                                exception -> false
-                        ).thenApply(
-                                vulcanSuccess ->
-                                        coreProtectSuccess ||
-                                                liteBansSuccess ||
-                                                vulcanSuccess
-                        )
-                )
-        );
-    }
+                                addedByName,
+                                type,
+                                content,
+                                createdAt
+                        );
 
-    private CompletableFuture<Boolean> addEvidence(
-            long caseId,
-            String type,
-            String content,
-            UUID addedByUuid,
-            String addedByName
-    ) {
-
-        if (caseId <= 0 ||
-                type == null ||
-                type.isBlank() ||
-                content == null ||
-                content.isBlank() ||
-                addedByUuid == null) {
-
-            return CompletableFuture.completedFuture(false);
-        }
-
-        return evidenceService
-                .addEvidence(
+                timelineService.addEntry(
                         caseId,
                         addedByUuid,
                         addedByName,
-                        type,
-                        content
-                )
-                .thenApply(
-                        evidence -> evidence != null
-                )
-                .exceptionally(
-                        exception -> {
+                        "EVIDENCE_ADDED",
+                        "Evidence #" +
+                                evidenceId +
+                                " added (" +
+                                type +
+                                ")."
+                ).join();
 
-                            plugin.getLogger().warning(
-                                    "Failed to save integration evidence: " +
-                                            getRootMessage(exception)
-                            );
+                return evidence;
 
-                            return false;
-                        }
+            } catch (SQLException exception) {
+
+                throw new RuntimeException(
+                        "Failed to add case evidence.",
+                        exception
                 );
+            }
+        });
     }
 
-    public boolean isCoreProtectAvailable() {
-
-        return integrationManager
-                .isCoreProtectAvailable();
-    }
-
-    public boolean isVulcanAvailable() {
-
-        return integrationManager
-                .isVulcanAvailable();
-    }
-
-    public boolean isLiteBansAvailable() {
-
-        return integrationManager
-                .isLiteBansAvailable();
-    }
-
-    public String getAvailableIntegrations() {
-
-        StringBuilder builder =
-                new StringBuilder();
-
-        if (isCoreProtectAvailable()) {
-
-            builder.append(
-                    "CoreProtect"
-            );
-        }
-
-        if (isVulcanAvailable()) {
-
-            appendSeparator(builder);
-
-            builder.append(
-                    "Vulcan"
-            );
-        }
-
-        if (isLiteBansAvailable()) {
-
-            appendSeparator(builder);
-
-            builder.append(
-                    "LiteBans"
-            );
-        }
-
-        if (builder.isEmpty()) {
-            return "None";
-        }
-
-        return builder.toString();
-    }
-
-    private void appendSeparator(
-            StringBuilder builder
+    public CompletableFuture<List<CaseEvidence>> getEvidence(
+            long caseId
     ) {
 
-        if (!builder.isEmpty()) {
-            builder.append(", ");
-        }
-    }
+        if (caseId <= 0) {
 
-    private String getRootMessage(
-            Throwable throwable
-    ) {
-
-        if (throwable == null) {
-            return "Unknown error";
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
         }
 
-        Throwable current =
-                throwable;
+        return CompletableFuture.supplyAsync(() -> {
 
-        while (current.getCause() != null) {
-            current =
-                    current.getCause();
-        }
+            String sql = """
+                    SELECT
+                        id,
+                        case_id,
+                        added_by_uuid,
+                        added_by_name,
+                        type,
+                        content,
+                        created_at
+                    FROM case_evidence
+                    WHERE case_id = ?
+                    ORDER BY id ASC
+                    """;
 
-        String message =
-                current.getMessage();
+            List<CaseEvidence> evidenceList =
+                    new ArrayList<>();
 
-        if (message == null ||
-                message.isBlank()) {
+            try (
+                    Connection connection =
+                            database.getConnection();
 
-            return current
-                    .getClass()
-                    .getSimpleName();
-        }
+                    PreparedStatement statement =
+                            connection.prepareStatement(sql)
+            ) {
 
-        return message;
+                statement.setLong(
+                        1,
+                        caseId
+                );
+
+                try (
+                        ResultSet result =
+                                statement.executeQuery()
+                ) {
+
+                    while (result.next()) {
+
+                        String uuidString =
+                                result.getString(
+                                        "added_by_uuid"
+                                );
+
+                        if (uuidString == null ||
+                                uuidString.isBlank()) {
+
+                            throw new SQLException(
+                                    "Evidence #" +
+                                            result.getLong("id") +
+                                            " contains a missing author UUID."
+                            );
+                        }
+
+                        UUID addedByUuid;
+
+                        try {
+
+                            addedByUuid =
+                                    UUID.fromString(
+                                            uuidString
+                                    );
+
+                        } catch (IllegalArgumentException exception) {
+
+                            throw new SQLException(
+                                    "Evidence #" +
+                                            result.getLong("id") +
+                                            " contains an invalid author UUID.",
+                                    exception
+                            );
+                        }
+
+                        Timestamp timestamp =
+                                result.getTimestamp(
+                                        "created_at"
+                                );
+
+                        if (timestamp == null) {
+
+                            throw new SQLException(
+                                    "Evidence #" +
+                                            result.getLong("id") +
+                                            " has no creation timestamp."
+                            );
+                        }
+
+                        Instant createdAt =
+                                timestamp.toInstant();
+
+                        CaseEvidence evidence =
+                                new CaseEvidence(
+                                        result.getLong("id"),
+                                        result.getLong("case_id"),
+                                        addedByUuid,
+                                        result.getString(
+                                                "added_by_name"
+                                        ),
+                                        result.getString(
+                                                "type"
+                                        ),
+                                        result.getString(
+                                                "content"
+                                        ),
+                                        createdAt
+                                );
+
+                        evidenceList.add(
+                                evidence
+                        );
+                    }
+                }
+
+                return evidenceList;
+
+            } catch (SQLException exception) {
+
+                throw new RuntimeException(
+                        "Failed to retrieve evidence for case #" +
+                                caseId,
+                        exception
+                );
+            }
+        });
     }
 }
