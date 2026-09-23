@@ -34,18 +34,29 @@ public final class EvidenceIntegrationService {
     ) {
 
         if (!integrationManager.isCoreProtectAvailable()) {
+            return CompletableFuture.completedFuture(false);
+        }
+
+        if (caseId <= 0 ||
+                targetName == null ||
+                targetName.isBlank() ||
+                addedByUuid == null) {
 
             return CompletableFuture.completedFuture(false);
         }
 
-        if (targetName == null ||
-                targetName.isBlank()) {
+        if (timeSeconds <= 0 ||
+                limit <= 0) {
 
             return CompletableFuture.completedFuture(false);
         }
 
         CoreProtectIntegration coreProtect =
                 integrationManager.getCoreProtect();
+
+        if (coreProtect == null) {
+            return CompletableFuture.completedFuture(false);
+        }
 
         return coreProtect
                 .lookupPlayerHistory(
@@ -69,6 +80,15 @@ public final class EvidenceIntegrationService {
                             addedByUuid,
                             addedByName
                     );
+                })
+                .exceptionally(exception -> {
+
+                    plugin.getLogger().warning(
+                            "Failed to collect CoreProtect evidence: " +
+                                    getRootMessage(exception)
+                    );
+
+                    return false;
                 });
     }
 
@@ -80,16 +100,20 @@ public final class EvidenceIntegrationService {
     ) {
 
         CompletableFuture<Boolean> future =
-                CompletableFuture.completedFuture(true);
+                CompletableFuture.completedFuture(false);
 
         for (
                 CoreProtectIntegration.CoreProtectRecord record :
                 records
         ) {
 
+            if (record == null) {
+                continue;
+            }
+
             future =
                     future.thenCompose(
-                            success ->
+                            alreadyAdded ->
                                     addEvidence(
                                             caseId,
                                             "COREPROTECT",
@@ -97,7 +121,8 @@ public final class EvidenceIntegrationService {
                                             addedByUuid,
                                             addedByName
                                     ).thenApply(
-                                            added -> success && added
+                                            added ->
+                                                    alreadyAdded || added
                                     )
                     );
         }
@@ -115,17 +140,23 @@ public final class EvidenceIntegrationService {
     ) {
 
         if (!integrationManager.isLiteBansAvailable()) {
-
             return CompletableFuture.completedFuture(false);
         }
 
-        if (targetUuid == null) {
+        if (caseId <= 0 ||
+                targetUuid == null ||
+                addedByUuid == null ||
+                limit <= 0) {
 
             return CompletableFuture.completedFuture(false);
         }
 
         LiteBansIntegration liteBans =
                 integrationManager.getLiteBans();
+
+        if (liteBans == null) {
+            return CompletableFuture.completedFuture(false);
+        }
 
         return CompletableFuture.supplyAsync(
                 () ->
@@ -149,8 +180,18 @@ public final class EvidenceIntegrationService {
                     addedByUuid,
                     addedByName
             );
+
+        }).exceptionally(exception -> {
+
+            plugin.getLogger().warning(
+                    "Failed to collect LiteBans evidence: " +
+                            getRootMessage(exception)
+            );
+
+            return false;
         });
     }
+
     private CompletableFuture<Boolean> addLiteBansRecords(
             long caseId,
             List<LiteBansIntegration.LiteBansPunishment> records,
@@ -159,16 +200,20 @@ public final class EvidenceIntegrationService {
     ) {
 
         CompletableFuture<Boolean> future =
-                CompletableFuture.completedFuture(true);
+                CompletableFuture.completedFuture(false);
 
         for (
                 LiteBansIntegration.LiteBansPunishment record :
                 records
         ) {
 
+            if (record == null) {
+                continue;
+            }
+
             future =
                     future.thenCompose(
-                            success ->
+                            alreadyAdded ->
                                     addEvidence(
                                             caseId,
                                             "LITEBANS",
@@ -176,7 +221,8 @@ public final class EvidenceIntegrationService {
                                             addedByUuid,
                                             addedByName
                                     ).thenApply(
-                                            added -> success && added
+                                            added ->
+                                                    alreadyAdded || added
                                     )
                     );
         }
@@ -193,17 +239,22 @@ public final class EvidenceIntegrationService {
     ) {
 
         if (!integrationManager.isVulcanAvailable()) {
-
             return CompletableFuture.completedFuture(false);
         }
 
-        if (targetUuid == null) {
+        if (caseId <= 0 ||
+                targetUuid == null ||
+                addedByUuid == null) {
 
             return CompletableFuture.completedFuture(false);
         }
 
         VulcanIntegration vulcan =
                 integrationManager.getVulcan();
+
+        if (vulcan == null) {
+            return CompletableFuture.completedFuture(false);
+        }
 
         return CompletableFuture.supplyAsync(
                 () ->
@@ -228,6 +279,15 @@ public final class EvidenceIntegrationService {
                     addedByUuid,
                     addedByName
             );
+
+        }).exceptionally(exception -> {
+
+            plugin.getLogger().warning(
+                    "Failed to collect Vulcan evidence: " +
+                            getRootMessage(exception)
+            );
+
+            return false;
         });
     }
 
@@ -242,6 +302,11 @@ public final class EvidenceIntegrationService {
             String addedByName
     ) {
 
+        /*
+         * Keep collecting even if one integration is unavailable
+         * or fails. One integration must never prevent another
+         * available integration from being collected.
+         */
         return collectCoreProtectEvidence(
                 caseId,
                 targetUuid,
@@ -250,27 +315,34 @@ public final class EvidenceIntegrationService {
                 coreProtectLimit,
                 addedByUuid,
                 addedByName
-        ).thenCompose(
-                ignored ->
-                        collectLiteBansEvidence(
-                                caseId,
-                                targetUuid,
-                                targetName,
-                                punishmentLimit,
-                                addedByUuid,
-                                addedByName
-                        )
-        ).thenCompose(
-                ignored ->
+        ).exceptionally(
+                exception -> false
+        ).thenCompose(coreProtectSuccess ->
+                collectLiteBansEvidence(
+                        caseId,
+                        targetUuid,
+                        targetName,
+                        punishmentLimit,
+                        addedByUuid,
+                        addedByName
+                ).exceptionally(
+                        exception -> false
+                ).thenCompose(liteBansSuccess ->
                         collectVulcanEvidence(
                                 caseId,
                                 targetUuid,
                                 targetName,
                                 addedByUuid,
                                 addedByName
+                        ).exceptionally(
+                                exception -> false
+                        ).thenApply(
+                                vulcanSuccess ->
+                                        coreProtectSuccess ||
+                                                liteBansSuccess ||
+                                                vulcanSuccess
                         )
-        ).thenApply(
-                ignored -> true
+                )
         );
     }
 
@@ -282,6 +354,16 @@ public final class EvidenceIntegrationService {
             String addedByName
     ) {
 
+        if (caseId <= 0 ||
+                type == null ||
+                type.isBlank() ||
+                content == null ||
+                content.isBlank() ||
+                addedByUuid == null) {
+
+            return CompletableFuture.completedFuture(false);
+        }
+
         return evidenceService
                 .addEvidence(
                         caseId,
@@ -291,7 +373,7 @@ public final class EvidenceIntegrationService {
                         content
                 )
                 .thenApply(
-                        evidence -> true
+                        evidence -> evidence != null
                 )
                 .exceptionally(
                         exception -> {
@@ -305,6 +387,7 @@ public final class EvidenceIntegrationService {
                         }
                 );
     }
+
     public boolean isCoreProtectAvailable() {
 
         return integrationManager
@@ -354,7 +437,6 @@ public final class EvidenceIntegrationService {
         }
 
         if (builder.isEmpty()) {
-
             return "None";
         }
 
@@ -366,7 +448,6 @@ public final class EvidenceIntegrationService {
     ) {
 
         if (!builder.isEmpty()) {
-
             builder.append(", ");
         }
     }
@@ -375,22 +456,29 @@ public final class EvidenceIntegrationService {
             Throwable throwable
     ) {
 
+        if (throwable == null) {
+            return "Unknown error";
+        }
+
         Throwable current =
                 throwable;
 
         while (current.getCause() != null) {
-
             current =
                     current.getCause();
         }
 
-        if (current.getMessage() == null) {
+        String message =
+                current.getMessage();
+
+        if (message == null ||
+                message.isBlank()) {
 
             return current
                     .getClass()
                     .getSimpleName();
         }
 
-        return current.getMessage();
+        return message;
     }
 }
