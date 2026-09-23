@@ -1,228 +1,396 @@
-package me.grate.casemanager.casefile;
+package me.grate.casemanager.integration;
 
-import me.grate.casemanager.database.DatabaseManager;
+import me.grate.casemanager.CaseManager;
+import me.grate.casemanager.casefile.CaseEvidenceService;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-public final class CaseEvidenceService {
+public final class EvidenceIntegrationService {
 
-    private final DatabaseManager database;
-    private final CaseTimelineService timelineService;
+    private final CaseManager plugin;
+    private final IntegrationManager integrationManager;
+    private final CaseEvidenceService evidenceService;
 
-    public CaseEvidenceService(
-            DatabaseManager database,
-            CaseTimelineService timelineService
+    public EvidenceIntegrationService(
+            CaseManager plugin,
+            IntegrationManager integrationManager,
+            CaseEvidenceService evidenceService
     ) {
-        this.database = database;
-        this.timelineService = timelineService;
+        this.plugin = plugin;
+        this.integrationManager = integrationManager;
+        this.evidenceService = evidenceService;
     }
 
-    public CompletableFuture<CaseEvidence> addEvidence(
+    public CompletableFuture<Boolean> collectCoreProtectEvidence(
             long caseId,
+            UUID targetUuid,
+            String targetName,
+            int timeSeconds,
+            int limit,
             UUID addedByUuid,
-            String addedByName,
-            String type,
-            String content
+            String addedByName
     ) {
 
-        return CompletableFuture.supplyAsync(() -> {
+        if (!integrationManager.isCoreProtectAvailable()) {
 
-            String sql = """
-                    INSERT INTO case_evidence
-                    (
-                        case_id,
-                        added_by_uuid,
-                        added_by_name,
-                        type,
-                        content
-                    )
-                    VALUES (?, ?, ?, ?, ?)
-                    """;
+            return CompletableFuture.completedFuture(false);
+        }
 
-            try (
-                    Connection connection =
-                            database.getConnection();
+        if (targetName == null ||
+                targetName.isBlank()) {
 
-                    PreparedStatement statement =
-                            connection.prepareStatement(
-                                    sql,
-                                    java.sql.Statement.RETURN_GENERATED_KEYS
-                            )
-            ) {
+            return CompletableFuture.completedFuture(false);
+        }
 
-                statement.setLong(
-                        1,
-                        caseId
-                );
+        CoreProtectIntegration coreProtect =
+                integrationManager.getCoreProtect();
 
-                statement.setString(
-                        2,
-                        addedByUuid.toString()
-                );
+        return coreProtect
+                .lookupPlayerHistory(
+                        targetName,
+                        timeSeconds,
+                        limit
+                )
+                .thenCompose(records -> {
 
-                statement.setString(
-                        3,
-                        addedByName
-                );
+                    if (records == null ||
+                            records.isEmpty()) {
 
-                statement.setString(
-                        4,
-                        type
-                );
-
-                statement.setString(
-                        5,
-                        content
-                );
-
-                statement.executeUpdate();
-
-                try (
-                        ResultSet keys =
-                                statement.getGeneratedKeys()
-                ) {
-
-                    if (!keys.next()) {
-                        throw new SQLException(
-                                "Failed to retrieve generated evidence ID."
+                        return CompletableFuture.completedFuture(
+                                false
                         );
                     }
 
-                    long evidenceId =
-                            keys.getLong(1);
-
-                    Instant createdAt =
-                            Instant.now();
-
-                    CaseEvidence evidence =
-                            new CaseEvidence(
-                                    evidenceId,
-                                    caseId,
-                                    addedByUuid,
-                                    addedByName,
-                                    type,
-                                    content,
-                                    createdAt
-                            );
-
-                    timelineService.addEntry(
+                    return addCoreProtectRecords(
                             caseId,
+                            records,
                             addedByUuid,
-                            addedByName,
-                            "EVIDENCE_ADDED",
-                            "Evidence #" +
-                                    evidenceId +
-                                    " added (" +
-                                    type +
-                                    ")."
-                    ).join();
+                            addedByName
+                    );
+                });
+    }
 
-                    return evidence;
-                }
+    private CompletableFuture<Boolean> addCoreProtectRecords(
+            long caseId,
+            List<CoreProtectIntegration.CoreProtectRecord> records,
+            UUID addedByUuid,
+            String addedByName
+    ) {
 
-            } catch (SQLException exception) {
+        CompletableFuture<Boolean> future =
+                CompletableFuture.completedFuture(true);
 
-                throw new RuntimeException(
-                        "Failed to add case evidence.",
-                        exception
+        for (
+                CoreProtectIntegration.CoreProtectRecord record :
+                records
+        ) {
+
+            future =
+                    future.thenCompose(
+                            success ->
+                                    addEvidence(
+                                            caseId,
+                                            "COREPROTECT",
+                                            record.toEvidenceText(),
+                                            addedByUuid,
+                                            addedByName
+                                    ).thenApply(
+                                            added -> success && added
+                                    )
+                    );
+        }
+
+        return future;
+    }
+
+    public CompletableFuture<Boolean> collectLiteBansEvidence(
+            long caseId,
+            UUID targetUuid,
+            String targetName,
+            int limit,
+            UUID addedByUuid,
+            String addedByName
+    ) {
+
+        if (!integrationManager.isLiteBansAvailable()) {
+
+            return CompletableFuture.completedFuture(false);
+        }
+
+        if (targetUuid == null) {
+
+            return CompletableFuture.completedFuture(false);
+        }
+
+        LiteBansIntegration liteBans =
+                integrationManager.getLiteBans();
+
+        return CompletableFuture.supplyAsync(
+                () ->
+                        liteBans.getPunishmentHistory(
+                                targetUuid,
+                                limit
+                        )
+        ).thenCompose(history -> {
+
+            if (history == null ||
+                    history.isEmpty()) {
+
+                return CompletableFuture.completedFuture(
+                        false
                 );
             }
+
+            return addLiteBansRecords(
+                    caseId,
+                    history,
+                    addedByUuid,
+                    addedByName
+            );
+        });
+    }
+    private CompletableFuture<Boolean> addLiteBansRecords(
+            long caseId,
+            List<LiteBansIntegration.LiteBansPunishment> records,
+            UUID addedByUuid,
+            String addedByName
+    ) {
+
+        CompletableFuture<Boolean> future =
+                CompletableFuture.completedFuture(true);
+
+        for (
+                LiteBansIntegration.LiteBansPunishment record :
+                records
+        ) {
+
+            future =
+                    future.thenCompose(
+                            success ->
+                                    addEvidence(
+                                            caseId,
+                                            "LITEBANS",
+                                            record.toEvidenceText(),
+                                            addedByUuid,
+                                            addedByName
+                                    ).thenApply(
+                                            added -> success && added
+                                    )
+                    );
+        }
+
+        return future;
+    }
+
+    public CompletableFuture<Boolean> collectVulcanEvidence(
+            long caseId,
+            UUID targetUuid,
+            String targetName,
+            UUID addedByUuid,
+            String addedByName
+    ) {
+
+        if (!integrationManager.isVulcanAvailable()) {
+
+            return CompletableFuture.completedFuture(false);
+        }
+
+        if (targetUuid == null) {
+
+            return CompletableFuture.completedFuture(false);
+        }
+
+        VulcanIntegration vulcan =
+                integrationManager.getVulcan();
+
+        return CompletableFuture.supplyAsync(
+                () ->
+                        vulcan.createEvidenceSummary(
+                                targetUuid,
+                                targetName
+                        )
+        ).thenCompose(summary -> {
+
+            if (summary == null ||
+                    summary.isBlank()) {
+
+                return CompletableFuture.completedFuture(
+                        false
+                );
+            }
+
+            return addEvidence(
+                    caseId,
+                    "ANTI_CHEAT",
+                    summary,
+                    addedByUuid,
+                    addedByName
+            );
         });
     }
 
-    public CompletableFuture<List<CaseEvidence>> getEvidence(
-            long caseId
+    public CompletableFuture<Boolean> collectAllEvidence(
+            long caseId,
+            UUID targetUuid,
+            String targetName,
+            int coreProtectTimeSeconds,
+            int coreProtectLimit,
+            int punishmentLimit,
+            UUID addedByUuid,
+            String addedByName
     ) {
 
-        return CompletableFuture.supplyAsync(() -> {
+        return collectCoreProtectEvidence(
+                caseId,
+                targetUuid,
+                targetName,
+                coreProtectTimeSeconds,
+                coreProtectLimit,
+                addedByUuid,
+                addedByName
+        ).thenCompose(
+                ignored ->
+                        collectLiteBansEvidence(
+                                caseId,
+                                targetUuid,
+                                targetName,
+                                punishmentLimit,
+                                addedByUuid,
+                                addedByName
+                        )
+        ).thenCompose(
+                ignored ->
+                        collectVulcanEvidence(
+                                caseId,
+                                targetUuid,
+                                targetName,
+                                addedByUuid,
+                                addedByName
+                        )
+        ).thenApply(
+                ignored -> true
+        );
+    }
 
-            String sql = """
-                    SELECT
-                        id,
-                        case_id,
-                        added_by_uuid,
-                        added_by_name,
+    private CompletableFuture<Boolean> addEvidence(
+            long caseId,
+            String type,
+            String content,
+            UUID addedByUuid,
+            String addedByName
+    ) {
+
+        return evidenceService
+                .addEvidence(
+                        caseId,
+                        addedByUuid,
+                        addedByName,
                         type,
-                        content,
-                        created_at
-                    FROM case_evidence
-                    WHERE case_id = ?
-                    ORDER BY id ASC
-                    """;
+                        content
+                )
+                .thenApply(
+                        evidence -> true
+                )
+                .exceptionally(
+                        exception -> {
 
-            List<CaseEvidence> evidenceList =
-                    new ArrayList<>();
+                            plugin.getLogger().warning(
+                                    "Failed to save integration evidence: " +
+                                            getRootMessage(exception)
+                            );
 
-            try (
-                    Connection connection =
-                            database.getConnection();
-
-                    PreparedStatement statement =
-                            connection.prepareStatement(sql)
-            ) {
-
-                statement.setLong(
-                        1,
-                        caseId
+                            return false;
+                        }
                 );
+    }
+    public boolean isCoreProtectAvailable() {
 
-                try (
-                        ResultSet result =
-                                statement.executeQuery()
-                ) {
+        return integrationManager
+                .isCoreProtectAvailable();
+    }
 
-                    while (result.next()) {
+    public boolean isVulcanAvailable() {
 
-                        UUID addedByUuid =
-                                UUID.fromString(
-                                        result.getString(
-                                                "added_by_uuid"
-                                        )
-                                );
+        return integrationManager
+                .isVulcanAvailable();
+    }
 
-                        Instant createdAt =
-                                result.getTimestamp(
-                                        "created_at"
-                                ).toInstant();
+    public boolean isLiteBansAvailable() {
 
-                        CaseEvidence evidence =
-                                new CaseEvidence(
-                                        result.getLong("id"),
-                                        result.getLong("case_id"),
-                                        addedByUuid,
-                                        result.getString(
-                                                "added_by_name"
-                                        ),
-                                        result.getString(
-                                                "type"
-                                        ),
-                                        result.getString(
-                                                "content"
-                                        ),
-                                        createdAt
-                                );
+        return integrationManager
+                .isLiteBansAvailable();
+    }
 
-                        evidenceList.add(evidence);
-                    }
-                }
+    public String getAvailableIntegrations() {
 
-                return evidenceList;
+        StringBuilder builder =
+                new StringBuilder();
 
-            } catch (SQLException exception) {
+        if (isCoreProtectAvailable()) {
 
-                throw new RuntimeException(
-                        "Failed to retrieve case evidence.",
-                        exception
-                );
-            }
-        });
+            builder.append(
+                    "CoreProtect"
+            );
+        }
+
+        if (isVulcanAvailable()) {
+
+            appendSeparator(builder);
+
+            builder.append(
+                    "Vulcan"
+            );
+        }
+
+        if (isLiteBansAvailable()) {
+
+            appendSeparator(builder);
+
+            builder.append(
+                    "LiteBans"
+            );
+        }
+
+        if (builder.isEmpty()) {
+
+            return "None";
+        }
+
+        return builder.toString();
+    }
+
+    private void appendSeparator(
+            StringBuilder builder
+    ) {
+
+        if (!builder.isEmpty()) {
+
+            builder.append(", ");
+        }
+    }
+
+    private String getRootMessage(
+            Throwable throwable
+    ) {
+
+        Throwable current =
+                throwable;
+
+        while (current.getCause() != null) {
+
+            current =
+                    current.getCause();
+        }
+
+        if (current.getMessage() == null) {
+
+            return current
+                    .getClass()
+                    .getSimpleName();
+        }
+
+        return current.getMessage();
     }
 }
