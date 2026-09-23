@@ -8,6 +8,7 @@ import me.grate.casemanager.casefile.CaseTimelineService;
 import me.grate.casemanager.command.CaseCommand;
 import me.grate.casemanager.database.DatabaseManager;
 import me.grate.casemanager.database.DatabaseTables;
+import me.grate.casemanager.integration.EvidenceIntegrationService;
 import me.grate.casemanager.integration.IntegrationManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -24,6 +25,7 @@ public final class CaseManager extends JavaPlugin {
     private CaseInvestigatorService caseInvestigatorService;
 
     private IntegrationManager integrationManager;
+    private EvidenceIntegrationService evidenceIntegrationService;
 
     @Override
     public void onEnable() {
@@ -42,6 +44,13 @@ public final class CaseManager extends JavaPlugin {
         try {
 
             databaseManager.connect();
+
+            if (!databaseManager.isConnected()) {
+
+                throw new IllegalStateException(
+                        "Database connection pool was not initialized."
+                );
+            }
 
             DatabaseTables.createTables(
                     this,
@@ -93,31 +102,25 @@ public final class CaseManager extends JavaPlugin {
         }
 
         /*
-         * Initialize optional integrations.
+         * Initialize optional external integrations.
          *
-         * CaseManager does not require these plugins.
-         *
-         * Supported integrations:
-         *
-         * - CoreProtect
-         * - Vulcan
-         * - LiteBans
-         *
-         * If an integration is not installed,
-         * CaseManager will simply disable that integration.
+         * CaseManager does not require any of these plugins.
          */
-
         integrationManager =
                 new IntegrationManager(this);
 
         integrationManager.initialize();
 
         /*
-         * Register /case command.
+         * Create the service that connects external integrations
+         * to the CaseManager evidence system.
          */
-
-        CaseCommand caseCommand =
-                new CaseCommand(this);
+        evidenceIntegrationService =
+                new EvidenceIntegrationService(
+                        this,
+                        integrationManager,
+                        caseEvidenceService
+                );
 
         if (getCommand("case") == null) {
 
@@ -132,6 +135,9 @@ public final class CaseManager extends JavaPlugin {
             return;
         }
 
+        CaseCommand caseCommand =
+                new CaseCommand(this);
+
         getCommand("case")
                 .setExecutor(caseCommand);
 
@@ -141,28 +147,37 @@ public final class CaseManager extends JavaPlugin {
         getLogger().info(
                 "CaseManager enabled!"
         );
+
+        getLogger().info(
+                "Available integrations: " +
+                        evidenceIntegrationService
+                                .getAvailableIntegrations()
+        );
     }
 
     @Override
     public void onDisable() {
-
-        /*
-         * Shut down integrations first.
-         */
 
         if (integrationManager != null) {
 
             integrationManager.shutdown();
         }
 
-        /*
-         * Close database connection pool.
-         */
-
         if (databaseManager != null) {
 
             databaseManager.close();
         }
+
+        evidenceIntegrationService = null;
+        integrationManager = null;
+
+        caseService = null;
+        caseTimelineService = null;
+        caseNoteService = null;
+        caseEvidenceService = null;
+        caseInvestigatorService = null;
+
+        databaseManager = null;
 
         instance = null;
 
@@ -209,5 +224,10 @@ public final class CaseManager extends JavaPlugin {
     public IntegrationManager getIntegrationManager() {
 
         return integrationManager;
+    }
+
+    public EvidenceIntegrationService getEvidenceIntegrationService() {
+
+        return evidenceIntegrationService;
     }
 }
