@@ -33,6 +33,30 @@ public final class CaseService {
             String reason
     ) {
 
+        if (targetUuid == null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Target UUID cannot be null."
+                    )
+            );
+        }
+
+        if (creatorUuid == null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Creator UUID cannot be null."
+                    )
+            );
+        }
+
+        if (reason == null || reason.isBlank()) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case reason cannot be empty."
+                    )
+            );
+        }
+
         return CompletableFuture.supplyAsync(() -> {
 
             String sql = """
@@ -89,7 +113,17 @@ public final class CaseService {
                         CaseStatus.OPEN.name()
                 );
 
-                statement.executeUpdate();
+                int affected =
+                        statement.executeUpdate();
+
+                if (affected != 1) {
+                    throw new SQLException(
+                            "Case insert affected an unexpected number of rows: "
+                                    + affected
+                    );
+                }
+
+                long caseId;
 
                 try (
                         ResultSet keys =
@@ -102,35 +136,42 @@ public final class CaseService {
                         );
                     }
 
-                    long caseId =
+                    caseId =
                             keys.getLong(1);
-
-                    Instant now =
-                            Instant.now();
-
-                    Case caseFile =
-                            new Case(
-                                    caseId,
-                                    targetUuid,
-                                    targetName,
-                                    creatorUuid,
-                                    creatorName,
-                                    reason,
-                                    CaseStatus.OPEN,
-                                    now,
-                                    now
-                            );
-
-                    timelineService.addEntry(
-                            caseId,
-                            creatorUuid,
-                            creatorName,
-                            "CASE_CREATED",
-                            "Case created."
-                    ).join();
-
-                    return caseFile;
                 }
+
+                Instant now =
+                        Instant.now();
+
+                Case caseFile =
+                        new Case(
+                                caseId,
+                                targetUuid,
+                                targetName,
+                                creatorUuid,
+                                creatorName,
+                                reason,
+                                CaseStatus.OPEN,
+                                now,
+                                now
+                        );
+
+                /*
+                 * Record creation in the case timeline.
+                 *
+                 * This is deliberately waited for here so that
+                 * a successfully returned case also has its
+                 * creation event recorded.
+                 */
+                timelineService.addEntry(
+                        caseId,
+                        creatorUuid,
+                        creatorName,
+                        "CASE_CREATED",
+                        "Case created."
+                ).join();
+
+                return caseFile;
 
             } catch (SQLException exception) {
 
@@ -145,6 +186,14 @@ public final class CaseService {
     public CompletableFuture<Case> getCase(
             long caseId
     ) {
+
+        if (caseId <= 0) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -191,7 +240,8 @@ public final class CaseService {
             } catch (SQLException exception) {
 
                 throw new RuntimeException(
-                        "Failed to retrieve case #" + caseId,
+                        "Failed to retrieve case #" +
+                                caseId,
                         exception
                 );
             }
@@ -201,6 +251,24 @@ public final class CaseService {
     public CompletableFuture<List<Case>> getCases(
             int limit
     ) {
+
+        if (limit <= 0) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case list limit must be greater than zero."
+                    )
+            );
+        }
+
+        /*
+         * Prevent accidental requests for an enormous number
+         * of rows.
+         */
+        int safeLimit =
+                Math.min(
+                        limit,
+                        500
+                );
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -233,7 +301,7 @@ public final class CaseService {
 
                 statement.setInt(
                         1,
-                        limit
+                        safeLimit
                 );
 
                 try (
@@ -267,6 +335,30 @@ public final class CaseService {
             UUID actorUuid,
             String actorName
     ) {
+
+        if (caseId <= 0) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
+
+        if (newStatus == null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "New case status cannot be null."
+                    )
+            );
+        }
+
+        if (actorUuid == null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Actor UUID cannot be null."
+                    )
+            );
+        }
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -324,6 +416,10 @@ public final class CaseService {
                 CaseStatus oldStatus =
                         caseFile.getStatus();
 
+                /*
+                 * Nothing needs to be changed when the case is
+                 * already using the requested status.
+                 */
                 if (oldStatus == newStatus) {
                     return caseFile;
                 }
@@ -348,9 +444,11 @@ public final class CaseService {
                     int affected =
                             updateStatement.executeUpdate();
 
-                    if (affected == 0) {
+                    if (affected != 1) {
                         throw new SQLException(
-                                "Case status could not be updated."
+                                "Case status update affected " +
+                                        affected +
+                                        " rows."
                         );
                     }
                 }
@@ -382,30 +480,90 @@ public final class CaseService {
             }
         });
     }
+
     private Case mapCase(
             ResultSet result
     ) throws SQLException {
 
-        UUID targetUuid =
-                UUID.fromString(
-                        result.getString(
-                                "target_uuid"
-                        )
+        String targetUuidString =
+                result.getString(
+                        "target_uuid"
                 );
 
-        UUID creatorUuid =
-                UUID.fromString(
-                        result.getString(
-                                "creator_uuid"
-                        )
+        String creatorUuidString =
+                result.getString(
+                        "creator_uuid"
                 );
 
-        CaseStatus status =
-                CaseStatus.valueOf(
-                        result.getString(
-                                "status"
-                        )
+        if (targetUuidString == null ||
+                creatorUuidString == null) {
+
+            throw new SQLException(
+                    "Case contains a null UUID."
+            );
+        }
+
+        UUID targetUuid;
+
+        UUID creatorUuid;
+
+        try {
+
+            targetUuid =
+                    UUID.fromString(
+                            targetUuidString
+                    );
+
+            creatorUuid =
+                    UUID.fromString(
+                            creatorUuidString
+                    );
+
+        } catch (IllegalArgumentException exception) {
+
+            throw new SQLException(
+                    "Case contains an invalid UUID.",
+                    exception
+            );
+        }
+
+        String statusString =
+                result.getString(
+                        "status"
                 );
+
+        if (statusString == null) {
+
+            throw new SQLException(
+                    "Case contains a null status."
+            );
+        }
+
+        CaseStatus status;
+
+        try {
+
+            status =
+                    CaseStatus.valueOf(
+                            statusString.toUpperCase()
+                    );
+
+        } catch (IllegalArgumentException exception) {
+
+            throw new SQLException(
+                    "Case contains an invalid status: " +
+                            statusString,
+                    exception
+            );
+        }
+
+        if (result.getTimestamp("created_at") == null ||
+                result.getTimestamp("updated_at") == null) {
+
+            throw new SQLException(
+                    "Case contains a null timestamp."
+            );
+        }
 
         Instant createdAt =
                 result.getTimestamp(
