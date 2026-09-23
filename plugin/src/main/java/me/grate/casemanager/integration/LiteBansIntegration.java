@@ -5,7 +5,6 @@ import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -15,6 +14,9 @@ import java.util.List;
 import java.util.UUID;
 
 public final class LiteBansIntegration {
+
+    private static final int DEFAULT_LIMIT = 25;
+    private static final int MAX_LIMIT = 100;
 
     private final CaseManager plugin;
 
@@ -32,10 +34,7 @@ public final class LiteBansIntegration {
 
     public void initialize() {
 
-        available = false;
-
-        liteBansDatabase = null;
-        databaseGetMethod = null;
+        reset();
 
         Plugin liteBans =
                 plugin.getServer()
@@ -97,6 +96,23 @@ public final class LiteBansIntegration {
                 return;
             }
 
+            /*
+             * Verify that the documented prepareStatement()
+             * method is available before declaring the integration
+             * usable.
+             */
+            if (!hasPrepareStatementMethod()) {
+
+                plugin.getLogger().warning(
+                        "LiteBans Database API does not expose " +
+                                "prepareStatement(String)."
+                );
+
+                reset();
+
+                return;
+            }
+
             available = true;
 
             plugin.getLogger().info(
@@ -127,7 +143,7 @@ public final class LiteBansIntegration {
 
             plugin.getLogger().warning(
                     "Unexpected LiteBans integration error: " +
-                            exception.getMessage()
+                            getRootMessage(exception)
             );
 
             reset();
@@ -156,85 +172,94 @@ public final class LiteBansIntegration {
             return Collections.emptyList();
         }
 
-        if (limit <= 0) {
-            limit = 25;
-        }
-
-        if (limit > 100) {
-            limit = 100;
-        }
-
-        String uuid =
-                playerUuid.toString();
-
-        /*
-         * LiteBans exposes the bans table through its API.
-         *
-         * The API documentation uses {bans} as the table placeholder,
-         * which is resolved by LiteBans' Database API.
-         */
-
-        String query =
-                "SELECT * FROM {bans} " +
-                "WHERE uuid = ? " +
-                "ORDER BY time DESC " +
-                "LIMIT ?";
+        int safeLimit =
+                normalizeLimit(limit);
 
         List<LiteBansPunishment> punishments =
                 new ArrayList<>();
 
-        try (
-                PreparedStatement statement =
-                        prepareStatement(
-                                query
+        collectTable(
+                punishments,
+                "bans",
+                playerUuid,
+                safeLimit
+        );
+
+        collectTable(
+                punishments,
+                "mutes",
+                playerUuid,
+                safeLimit
+        );
+
+        collectTable(
+                punishments,
+                "warnings",
+                playerUuid,
+                safeLimit
+        );
+
+        collectTable(
+                punishments,
+                "kicks",
+                playerUuid,
+                safeLimit
+        );
+
+        punishments.sort(
+                (first, second) ->
+                        Long.compare(
+                                second.getTime(),
+                                first.getTime()
                         )
-        ) {
+        );
 
-            statement.setString(
-                    1,
-                    uuid
+        if (punishments.size() > safeLimit) {
+
+            return new ArrayList<>(
+                    punishments.subList(
+                            0,
+                            safeLimit
+                    )
             );
+        }
 
-            statement.setInt(
-                    2,
-                    limit
-            );
+        return punishments;
+    }
 
-            try (
-                    ResultSet result =
-                            statement.executeQuery()
-            ) {
+    public List<LiteBansPunishment> getBanHistory(
+            UUID playerUuid,
+            int limit
+    ) {
 
-                while (result.next()) {
-
-                    punishments.add(
-                            readPunishment(
-                                    result
-                            )
-                    );
-                }
-            }
-
-            return punishments;
-
-        } catch (SQLException exception) {
-
-            plugin.getLogger().warning(
-                    "LiteBans punishment lookup failed: " +
-                            exception.getMessage()
-            );
-
-            return Collections.emptyList();
-
-        } catch (Exception exception) {
-
-            plugin.getLogger().warning(
-                    "Unexpected LiteBans database error: " +
-                            exception.getMessage()
-            );
+        if (!isAvailable() ||
+                playerUuid == null) {
 
             return Collections.emptyList();
         }
+
+        int safeLimit =
+                normalizeLimit(limit);
+
+        List<LiteBansPunishment> punishments =
+                new ArrayList<>();
+
+        collectTable(
+                punishments,
+                "bans",
+                playerUuid,
+                safeLimit
+        );
+
+        punishments.sort(
+                (first, second) ->
+                        Long.compare(
+                                second.getTime(),
+                                first.getTime()
+                        )
+        );
+
+        return punishments;
     }
 
     public boolean isBanned(
@@ -255,9 +280,7 @@ public final class LiteBansIntegration {
 
         try (
                 PreparedStatement statement =
-                        prepareStatement(
-                                query
-                        )
+                        prepareStatement(query)
         ) {
 
             statement.setString(
@@ -281,7 +304,7 @@ public final class LiteBansIntegration {
 
             plugin.getLogger().warning(
                     "LiteBans ban check failed: " +
-                            exception.getMessage()
+                            getRootMessage(exception)
             );
 
             return false;
@@ -290,91 +313,10 @@ public final class LiteBansIntegration {
 
             plugin.getLogger().warning(
                     "Unexpected LiteBans ban check error: " +
-                            exception.getMessage()
+                            getRootMessage(exception)
             );
 
             return false;
-        }
-    }
-    public List<LiteBansPunishment> getBanHistory(
-            UUID playerUuid,
-            int limit
-    ) {
-
-        if (!isAvailable() ||
-                playerUuid == null) {
-
-            return Collections.emptyList();
-        }
-
-        if (limit <= 0) {
-            limit = 25;
-        }
-
-        if (limit > 100) {
-            limit = 100;
-        }
-
-        String query =
-                "SELECT * FROM {bans} " +
-                "WHERE uuid = ? " +
-                "ORDER BY time DESC " +
-                "LIMIT ?";
-
-        List<LiteBansPunishment> punishments =
-                new ArrayList<>();
-
-        try (
-                PreparedStatement statement =
-                        prepareStatement(
-                                query
-                        )
-        ) {
-
-            statement.setString(
-                    1,
-                    playerUuid.toString()
-            );
-
-            statement.setInt(
-                    2,
-                    limit
-            );
-
-            try (
-                    ResultSet result =
-                            statement.executeQuery()
-            ) {
-
-                while (result.next()) {
-
-                    punishments.add(
-                            readPunishment(
-                                    result
-                            )
-                    );
-                }
-            }
-
-            return punishments;
-
-        } catch (SQLException exception) {
-
-            plugin.getLogger().warning(
-                    "LiteBans ban history lookup failed: " +
-                            exception.getMessage()
-            );
-
-            return Collections.emptyList();
-
-        } catch (Exception exception) {
-
-            plugin.getLogger().warning(
-                    "Unexpected LiteBans ban history error: " +
-                            exception.getMessage()
-            );
-
-            return Collections.emptyList();
         }
     }
 
@@ -408,19 +350,25 @@ public final class LiteBansIntegration {
 
             builder.append(
                     "\nPlayer: "
-            ).append(playerName);
+            ).append(
+                    playerName
+            );
         }
 
         if (playerUuid != null) {
 
             builder.append(
                     "\nUUID: "
-            ).append(playerUuid);
+            ).append(
+                    playerUuid
+            );
         }
 
         builder.append(
                 "\nEntries: "
-        ).append(history.size());
+        ).append(
+                history.size()
+        );
 
         if (history.isEmpty()) {
 
@@ -438,9 +386,15 @@ public final class LiteBansIntegration {
                 history
         ) {
 
+            if (punishment == null) {
+                continue;
+            }
+
             builder.append(
                     "\n\n#"
-            ).append(index);
+            ).append(
+                    index
+            );
 
             builder.append(
                     "\nType: "
@@ -448,7 +402,8 @@ public final class LiteBansIntegration {
                     punishment.getType()
             );
 
-            if (punishment.getReason() != null) {
+            if (punishment.getReason() != null &&
+                    !punishment.getReason().isBlank()) {
 
                 builder.append(
                         "\nReason: "
@@ -490,16 +445,109 @@ public final class LiteBansIntegration {
         return builder.toString();
     }
 
+    private void collectTable(
+            List<LiteBansPunishment> destination,
+            String table,
+            UUID playerUuid,
+            int limit
+    ) {
+
+        if (destination == null ||
+                table == null ||
+                playerUuid == null) {
+
+            return;
+        }
+
+        String query =
+                "SELECT * FROM {" +
+                        table +
+                        "} " +
+                        "WHERE uuid = ? " +
+                        "ORDER BY time DESC " +
+                        "LIMIT ?";
+
+        try (
+                PreparedStatement statement =
+                        prepareStatement(query)
+        ) {
+
+            statement.setString(
+                    1,
+                    playerUuid.toString()
+            );
+
+            statement.setInt(
+                    2,
+                    limit
+            );
+
+            try (
+                    ResultSet result =
+                            statement.executeQuery()
+            ) {
+
+                while (result.next()) {
+
+                    try {
+
+                        destination.add(
+                                readPunishment(
+                                        result,
+                                        table
+                                )
+                        );
+
+                    } catch (SQLException exception) {
+
+                        plugin.getLogger().warning(
+                                "Failed to read a LiteBans " +
+                                        table +
+                                        " record: " +
+                                        getRootMessage(exception)
+                        );
+                    }
+                }
+            }
+
+        } catch (SQLException exception) {
+
+            /*
+             * Some LiteBans installations may not expose every
+             * punishment table depending on their version/config.
+             *
+             * A failure in one table must not prevent the other
+             * punishment tables from being collected.
+             */
+            plugin.getLogger().warning(
+                    "LiteBans " +
+                            table +
+                            " lookup failed: " +
+                            getRootMessage(exception)
+            );
+
+        } catch (Exception exception) {
+
+            plugin.getLogger().warning(
+                    "Unexpected LiteBans " +
+                            table +
+                            " lookup error: " +
+                            getRootMessage(exception)
+            );
+        }
+    }
+
     private PreparedStatement prepareStatement(
             String query
     )
             throws SQLException {
 
-        /*
-         * LiteBans' Database API exposes a prepareStatement method.
-         * We access it through reflection so CaseManager doesn't need
-         * LiteBans on its compile classpath.
-         */
+        if (liteBansDatabase == null) {
+
+            throw new SQLException(
+                    "LiteBans database API is unavailable."
+            );
+        }
 
         try {
 
@@ -540,7 +588,8 @@ public final class LiteBansIntegration {
     }
 
     private LiteBansPunishment readPunishment(
-            ResultSet result
+            ResultSet result,
+            String table
     )
             throws SQLException {
 
@@ -557,26 +606,9 @@ public final class LiteBansIntegration {
                 );
 
         UUID executorUuid =
-                null;
-
-        if (bannedByUuid != null &&
-                !bannedByUuid.isBlank()) {
-
-            try {
-
-                executorUuid =
-                        UUID.fromString(
-                                bannedByUuid
-                        );
-
-            } catch (IllegalArgumentException ignored) {
-
-                /*
-                 * Some LiteBans entries can contain non-UUID
-                 * executor identifiers. Keep the UUID null.
-                 */
-            }
-        }
+                parseUuid(
+                        bannedByUuid
+                );
 
         long time =
                 readLong(
@@ -603,8 +635,9 @@ public final class LiteBansIntegration {
                 );
 
         String type =
-                detectPunishmentType(
-                        result
+                determineType(
+                        result,
+                        table
                 );
 
         return new LiteBansPunishment(
@@ -618,48 +651,78 @@ public final class LiteBansIntegration {
         );
     }
 
-    private String detectPunishmentType(
-            ResultSet result
+    private String determineType(
+            ResultSet result,
+            String table
     ) {
 
-        String[] possibleColumns = {
-                "type",
-                "punishment_type",
-                "action"
-        };
+        String explicitType =
+                readNullableString(
+                        result,
+                        "type"
+                );
 
-        for (
-                String column :
-                possibleColumns
-        ) {
+        if (explicitType != null &&
+                !explicitType.isBlank()) {
 
-            try {
-
-                String value =
-                        result.getString(
-                                column
-                        );
-
-                if (value != null &&
-                        !value.isBlank()) {
-
-                    return value;
-                }
-
-            } catch (SQLException ignored) {
-
-                /*
-                 * Column doesn't exist in this LiteBans schema.
-                 */
-            }
+            return explicitType;
         }
 
-        /*
-         * The bans table represents bans, so use BAN when the
-         * schema doesn't expose a separate type column.
-         */
+        String punishmentType =
+                readNullableString(
+                        result,
+                        "punishment_type"
+                );
 
-        return "BAN";
+        if (punishmentType != null &&
+                !punishmentType.isBlank()) {
+
+            return punishmentType;
+        }
+
+        if (table == null) {
+            return "UNKNOWN";
+        }
+
+        return switch (table.toLowerCase()) {
+
+            case "bans" ->
+                    "BAN";
+
+            case "mutes" ->
+                    "MUTE";
+
+            case "warnings" ->
+                    "WARN";
+
+            case "kicks" ->
+                    "KICK";
+
+            default ->
+                    table.toUpperCase();
+        };
+    }
+
+    private UUID parseUuid(
+            String value
+    ) {
+
+        if (value == null ||
+                value.isBlank()) {
+
+            return null;
+        }
+
+        try {
+
+            return UUID.fromString(
+                    value
+            );
+
+        } catch (IllegalArgumentException ignored) {
+
+            return null;
+        }
     }
 
     private String readNullableString(
@@ -712,6 +775,21 @@ public final class LiteBansIntegration {
             return false;
         }
     }
+
+    private int normalizeLimit(
+            int limit
+    ) {
+
+        if (limit <= 0) {
+            return DEFAULT_LIMIT;
+        }
+
+        return Math.min(
+                limit,
+                MAX_LIMIT
+        );
+    }
+
     private Method findDatabaseGetMethod(
             Class<?> databaseClass
     ) {
@@ -737,9 +815,36 @@ public final class LiteBansIntegration {
         return null;
     }
 
+    private boolean hasPrepareStatementMethod() {
+
+        if (liteBansDatabase == null) {
+            return false;
+        }
+
+        try {
+
+            liteBansDatabase
+                    .getClass()
+                    .getMethod(
+                            "prepareStatement",
+                            String.class
+                    );
+
+            return true;
+
+        } catch (NoSuchMethodException exception) {
+
+            return false;
+        }
+    }
+
     private String getRootMessage(
             Throwable throwable
     ) {
+
+        if (throwable == null) {
+            return "Unknown error";
+        }
 
         Throwable current =
                 throwable;
@@ -753,10 +858,15 @@ public final class LiteBansIntegration {
         String message =
                 current.getMessage();
 
-        return message == null
-                ? current.getClass()
-                        .getSimpleName()
-                : message;
+        if (message == null ||
+                message.isBlank()) {
+
+            return current
+                    .getClass()
+                    .getSimpleName();
+        }
+
+        return message;
     }
 
     private void reset() {
@@ -777,7 +887,7 @@ public final class LiteBansIntegration {
 
         private final UUID executorUuid;
 
-        private final long time;
+private final long time;
         private final long until;
 
         private final boolean active;
@@ -792,7 +902,8 @@ public final class LiteBansIntegration {
                 boolean active
         ) {
 
-            this.id = id;
+            this.id =
+                    id;
 
             this.type =
                     type;
@@ -859,38 +970,52 @@ public final class LiteBansIntegration {
 
             builder.append(
                     "\nID: "
-            ).append(id);
+            ).append(
+                    id
+            );
 
             builder.append(
                     "\nType: "
-            ).append(type);
+            ).append(
+                    type
+            );
 
             if (reason != null &&
                     !reason.isBlank()) {
 
                 builder.append(
                         "\nReason: "
-                ).append(reason);
+                ).append(
+                        reason
+                );
             }
 
             if (executorUuid != null) {
 
                 builder.append(
                         "\nExecutor UUID: "
-                ).append(executorUuid);
+                ).append(
+                        executorUuid
+                );
             }
 
             builder.append(
                     "\nTime: "
-            ).append(time);
+            ).append(
+                    time
+            );
 
             builder.append(
                     "\nUntil: "
-            ).append(until);
+            ).append(
+                    until
+            );
 
             builder.append(
                     "\nActive: "
-            ).append(active);
+            ).append(
+                    active
+            );
 
             return builder.toString();
         }
