@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,6 +33,43 @@ public final class CaseInvestigatorService {
             UUID actorUuid,
             String actorName
     ) {
+
+        if (caseId <= 0) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
+
+        if (investigatorUuid == null) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Investigator UUID cannot be null."
+                    )
+            );
+        }
+
+        if (actorUuid == null) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Actor UUID cannot be null."
+                    )
+            );
+        }
+
+        if (investigatorName == null ||
+                investigatorName.isBlank()) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Investigator name cannot be empty."
+                    )
+            );
+        }
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -68,7 +106,17 @@ public final class CaseInvestigatorService {
                         investigatorName
                 );
 
-                statement.executeUpdate();
+                int affected =
+                        statement.executeUpdate();
+
+                if (affected != 1) {
+
+                    throw new SQLException(
+                            "Investigator assignment affected " +
+                                    affected +
+                                    " rows."
+                    );
+                }
 
                 CaseInvestigator investigator =
                         new CaseInvestigator(
@@ -106,6 +154,33 @@ public final class CaseInvestigatorService {
             UUID actorUuid,
             String actorName
     ) {
+
+        if (caseId <= 0) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
+
+        if (investigatorUuid == null) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Investigator UUID cannot be null."
+                    )
+            );
+        }
+
+        if (actorUuid == null) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Actor UUID cannot be null."
+                    )
+            );
+        }
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -177,10 +252,16 @@ public final class CaseInvestigatorService {
                     int affected =
                             deleteStatement.executeUpdate();
 
-                    if (affected == 0) {
+                    if (affected != 1) {
                         return false;
                     }
                 }
+
+                String displayName =
+                        investigatorName == null ||
+                                investigatorName.isBlank()
+                                ? investigatorUuid.toString()
+                                : investigatorName;
 
                 timelineService.addEntry(
                         caseId,
@@ -188,7 +269,7 @@ public final class CaseInvestigatorService {
                         actorName,
                         "INVESTIGATOR_UNASSIGNED",
                         "Investigator " +
-                                investigatorName +
+                                displayName +
                                 " was unassigned."
                 ).join();
 
@@ -207,6 +288,15 @@ public final class CaseInvestigatorService {
     public CompletableFuture<List<CaseInvestigator>> getInvestigators(
             long caseId
     ) {
+
+        if (caseId <= 0) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -244,17 +334,50 @@ public final class CaseInvestigatorService {
 
                     while (result.next()) {
 
-                        UUID investigatorUuid =
-                                UUID.fromString(
-                                        result.getString(
-                                                "investigator_uuid"
-                                        )
+                        String uuidString =
+                                result.getString(
+                                        "investigator_uuid"
                                 );
 
-                        Instant assignedAt =
+                        if (uuidString == null ||
+                                uuidString.isBlank()) {
+
+                            throw new SQLException(
+                                    "Investigator record contains a missing UUID."
+                            );
+                        }
+
+                        UUID investigatorUuid;
+
+                        try {
+
+                            investigatorUuid =
+                                    UUID.fromString(
+                                            uuidString
+                                    );
+
+                        } catch (IllegalArgumentException exception) {
+
+                            throw new SQLException(
+                                    "Investigator record contains an invalid UUID.",
+                                    exception
+                            );
+                        }
+
+                        Timestamp timestamp =
                                 result.getTimestamp(
                                         "assigned_at"
-                                ).toInstant();
+                                );
+
+                        if (timestamp == null) {
+
+                            throw new SQLException(
+                                    "Investigator record contains a missing assignment timestamp."
+                            );
+                        }
+
+                        Instant assignedAt =
+                                timestamp.toInstant();
 
                         CaseInvestigator investigator =
                                 new CaseInvestigator(
@@ -279,7 +402,8 @@ public final class CaseInvestigatorService {
             } catch (SQLException exception) {
 
                 throw new RuntimeException(
-                        "Failed to retrieve case investigators.",
+                        "Failed to retrieve investigators for case #" +
+                                caseId,
                         exception
                 );
             }
