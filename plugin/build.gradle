@@ -11,10 +11,18 @@ repositories {
     maven {
         url = 'https://hub.spigotmc.org/nexus/content/repositories/snapshots/'
     }
+
+    maven {
+        url = 'https://maven.playpro.com'
+    }
 }
 
 dependencies {
     compileOnly 'org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT'
+
+    // CoreProtect is provided by the Minecraft server.
+    // Do NOT package it inside CaseManager.
+    compileOnly 'net.coreprotect:CoreProtect:25.0'
 
     implementation 'com.zaxxer:HikariCP:7.0.2'
     implementation 'com.mysql:mysql-connector-j:9.4.0'
