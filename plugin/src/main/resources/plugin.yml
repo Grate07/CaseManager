@@ -9,7 +9,7 @@ author: Grate
 commands:
   case:
     description: Manage moderation cases
-    usage: /case <create|view|list|timeline|note|evidence|assign|unassign|investigators>
+    usage: /case <create|view|list|timeline|note|evidence|assign|unassign|investigators|status>
 
 permissions:
 
@@ -43,6 +43,10 @@ permissions:
 
   casemanager.investigators:
     description: View investigators assigned to cases
+    default: op
+
+  casemanager.status:
+    description: Change moderation case status
     default: op
 
   casemanager.use:
