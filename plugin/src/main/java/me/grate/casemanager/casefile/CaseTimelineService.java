@@ -6,6 +6,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,7 +18,9 @@ public final class CaseTimelineService {
 
     private final DatabaseManager database;
 
-    public CaseTimelineService(DatabaseManager database) {
+    public CaseTimelineService(
+            DatabaseManager database
+    ) {
         this.database = database;
     }
 
@@ -27,6 +31,25 @@ public final class CaseTimelineService {
             String action,
             String details
     ) {
+
+        if (caseId <= 0) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
+
+        if (action == null ||
+                action.isBlank()) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Timeline action cannot be empty."
+                    )
+            );
+        }
 
         return CompletableFuture.runAsync(() -> {
 
@@ -56,11 +79,14 @@ public final class CaseTimelineService {
                 );
 
                 if (actorUuid == null) {
+
                     statement.setNull(
                             2,
-                            java.sql.Types.VARCHAR
+                            Types.VARCHAR
                     );
+
                 } else {
+
                     statement.setString(
                             2,
                             actorUuid.toString()
@@ -82,7 +108,17 @@ public final class CaseTimelineService {
                         details
                 );
 
-                statement.executeUpdate();
+                int affected =
+                        statement.executeUpdate();
+
+                if (affected != 1) {
+
+                    throw new SQLException(
+                            "Timeline entry insert affected " +
+                                    affected +
+                                    " rows."
+                    );
+                }
 
             } catch (SQLException exception) {
 
@@ -97,6 +133,15 @@ public final class CaseTimelineService {
     public CompletableFuture<List<CaseTimelineEntry>> getTimeline(
             long caseId
     ) {
+
+        if (caseId <= 0) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -142,17 +187,45 @@ public final class CaseTimelineService {
                                         "actor_uuid"
                                 );
 
-                        UUID actorUuid =
-                                actorUuidString == null
-                                        ? null
-                                        : UUID.fromString(
+                        UUID actorUuid = null;
+
+                        if (actorUuidString != null &&
+                                !actorUuidString.isBlank()) {
+
+                            try {
+
+                                actorUuid =
+                                        UUID.fromString(
                                                 actorUuidString
                                         );
 
-                        Instant createdAt =
+                            } catch (IllegalArgumentException exception) {
+
+                                throw new SQLException(
+                                        "Timeline entry #" +
+                                                result.getLong("id") +
+                                                " contains an invalid actor UUID.",
+                                        exception
+                                );
+                            }
+                        }
+
+                        Timestamp timestamp =
                                 result.getTimestamp(
                                         "created_at"
-                                ).toInstant();
+                                );
+
+                        if (timestamp == null) {
+
+                            throw new SQLException(
+                                    "Timeline entry #" +
+                                            result.getLong("id") +
+                                            " has no creation timestamp."
+                            );
+                        }
+
+                        Instant createdAt =
+                                timestamp.toInstant();
 
                         CaseTimelineEntry entry =
                                 new CaseTimelineEntry(
@@ -171,7 +244,9 @@ public final class CaseTimelineService {
                                         createdAt
                                 );
 
-                        entries.add(entry);
+                        entries.add(
+                                entry
+                        );
                     }
                 }
 
@@ -180,7 +255,8 @@ public final class CaseTimelineService {
             } catch (SQLException exception) {
 
                 throw new RuntimeException(
-                        "Failed to retrieve case timeline.",
+                        "Failed to retrieve timeline for case #" +
+                                caseId,
                         exception
                 );
             }
