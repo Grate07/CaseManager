@@ -96,7 +96,10 @@ public final class IntegrationManager {
                             plugin
                     );
 
-            if (coreProtectIntegration.isAvailable()) {
+            boolean initialized =
+                    coreProtectIntegration.initialize();
+
+            if (initialized) {
 
                 plugin.getLogger().info(
                         "CoreProtect integration enabled."
@@ -107,6 +110,8 @@ public final class IntegrationManager {
                 plugin.getLogger().warning(
                         "CoreProtect was detected, but its API is unavailable."
                 );
+
+                coreProtectIntegration = null;
             }
 
         } catch (Exception exception) {
