@@ -1,5 +1,6 @@
 package me.grate.casemanager;
 
+import me.grate.casemanager.casefile.CaseEvidenceService;
 import me.grate.casemanager.casefile.CaseNoteService;
 import me.grate.casemanager.casefile.CaseService;
 import me.grate.casemanager.casefile.CaseTimelineService;
@@ -17,6 +18,7 @@ public final class CaseManager extends JavaPlugin {
     private CaseService caseService;
     private CaseTimelineService caseTimelineService;
     private CaseNoteService caseNoteService;
+    private CaseEvidenceService caseEvidenceService;
 
     @Override
     public void onEnable() {
@@ -48,6 +50,12 @@ public final class CaseManager extends JavaPlugin {
 
             caseNoteService =
                     new CaseNoteService(
+                            databaseManager,
+                            caseTimelineService
+                    );
+
+            caseEvidenceService =
+                    new CaseEvidenceService(
                             databaseManager,
                             caseTimelineService
                     );
@@ -130,5 +138,9 @@ public final class CaseManager extends JavaPlugin {
 
     public CaseNoteService getCaseNoteService() {
         return caseNoteService;
+    }
+
+    public CaseEvidenceService getCaseEvidenceService() {
+        return caseEvidenceService;
     }
 }
