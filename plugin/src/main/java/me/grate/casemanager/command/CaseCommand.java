@@ -25,6 +25,21 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
     private final CaseManager plugin;
 
+    /*
+     * Default investigation limits.
+     *
+     * These will later be moved into config.yml so server
+     * owners can customize them.
+     */
+    private static final int COREPROTECT_TIME_SECONDS =
+            86400;
+
+    private static final int COREPROTECT_LIMIT =
+            50;
+
+    private static final int PUNISHMENT_LIMIT =
+            20;
+
     private final List<String> evidenceTypes = Arrays.asList(
             "SCREENSHOT",
             "VIDEO",
@@ -35,6 +50,14 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             "OBSERVATION",
             "OTHER"
     );
+
+    private final List<String> evidenceCollectionTypes =
+            Arrays.asList(
+                    "all",
+                    "coreprotect",
+                    "vulcan",
+                    "litebans"
+            );
 
     private final List<String> statusNames = Arrays.asList(
             "OPEN",
@@ -465,6 +488,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                     return null;
                 });
     }
+
     private void handleNote(
             CommandSender sender,
             String[] args
@@ -603,7 +627,6 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                     return null;
                 });
     }
-
     private void handleEvidence(
             CommandSender sender,
             String[] args
@@ -613,7 +636,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
             sender.sendMessage(
                     ChatColor.RED +
-                            "Usage: /case evidence <add|list>"
+                            "Usage: /case evidence <add|list|collect>"
             );
 
             return;
@@ -638,11 +661,18 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                 );
                 break;
 
+            case "collect":
+                handleEvidenceCollect(
+                        sender,
+                        args
+                );
+                break;
+
             default:
 
                 sender.sendMessage(
                         ChatColor.RED +
-                                "Usage: /case evidence <add|list>"
+                                "Usage: /case evidence <add|list|collect>"
                 );
 
                 break;
@@ -915,6 +945,522 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                 });
     }
 
+    private void handleEvidenceCollect(
+            CommandSender sender,
+            String[] args
+    ) {
+
+        if (!sender.hasPermission(
+                "casemanager.evidence"
+        )) {
+
+            sendNoPermission(sender);
+            return;
+        }
+
+        if (!(sender instanceof Player player)) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Only players can collect evidence."
+            );
+
+            return;
+        }
+
+        if (args.length < 4) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Usage: /case evidence collect <id> <all|coreprotect|vulcan|litebans>"
+            );
+
+            return;
+        }
+
+        long caseId;
+
+        try {
+
+            caseId =
+                    Long.parseLong(
+                            args[2]
+                    );
+
+        } catch (NumberFormatException exception) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Case ID must be a number."
+            );
+
+            return;
+        }
+
+        String source =
+                args[3].toLowerCase();
+
+        if (!evidenceCollectionTypes.contains(source)) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Invalid evidence source."
+            );
+
+            sender.sendMessage(
+                    ChatColor.GRAY +
+                            "Available: " +
+                            String.join(
+                                    ", ",
+                                    evidenceCollectionTypes
+                            )
+            );
+
+            return;
+        }
+
+        plugin.getCaseService()
+                .getCase(caseId)
+                .thenAccept(caseFile -> {
+
+                    if (caseFile == null) {
+
+                        Bukkit.getScheduler().runTask(
+                                plugin,
+                                () -> sender.sendMessage(
+                                        ChatColor.RED +
+                                                "Case #" +
+                                                caseId +
+                                                " does not exist."
+                                )
+                        );
+
+                        return;
+                    }
+
+                    sendEvidenceCollectionStarted(
+                            player,
+                            caseFile,
+                            source
+                    );
+
+                    collectEvidence(
+                            player,
+                            caseFile,
+                            source
+                    );
+
+                })
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> player.sendMessage(
+                                    ChatColor.RED +
+                                            "Failed to retrieve the case."
+                            )
+                    );
+
+                    exception.printStackTrace();
+
+                    return null;
+                });
+    }
+
+    private void collectEvidence(
+            Player player,
+            Case caseFile,
+            String source
+    ) {
+
+        switch (source) {
+
+            case "coreprotect":
+
+                collectCoreProtect(
+                        player,
+                        caseFile
+                );
+
+                break;
+
+            case "vulcan":
+
+                collectVulcan(
+                        player,
+                        caseFile
+                );
+
+                break;
+
+            case "litebans":
+
+                collectLiteBans(
+                        player,
+                        caseFile
+                );
+
+                break;
+
+            case "all":
+
+                collectAll(
+                        player,
+                        caseFile
+                );
+
+                break;
+
+            default:
+
+                player.sendMessage(
+                        ChatColor.RED +
+                                "Unknown evidence source."
+                );
+
+                break;
+        }
+    }
+
+    private void collectCoreProtect(
+            Player player,
+            Case caseFile
+    ) {
+
+        if (!plugin.getEvidenceIntegrationService()
+                .isCoreProtectAvailable()) {
+
+            player.sendMessage(
+                    ChatColor.RED +
+                            "CoreProtect integration is not available."
+            );
+
+            return;
+        }
+
+        plugin.getEvidenceIntegrationService()
+                .collectCoreProtectEvidence(
+                        caseFile.getId(),
+                        caseFile.getTargetUuid(),
+                        caseFile.getTargetName(),
+                        COREPROTECT_TIME_SECONDS,
+                        COREPROTECT_LIMIT,
+                        player.getUniqueId(),
+                        player.getName()
+                )
+                .thenAccept(success ->
+                        Bukkit.getScheduler().runTask(
+                                plugin,
+                                () -> {
+
+                                    if (success) {
+
+                                        player.sendMessage(
+                                                ChatColor.GREEN +
+                                                        "CoreProtect evidence collected successfully."
+                                        );
+
+                                    } else {
+
+                                        player.sendMessage(
+                                                ChatColor.YELLOW +
+                                                        "CoreProtect returned no evidence."
+                                        );
+                                    }
+                                }
+                        )
+                )
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> player.sendMessage(
+                                    ChatColor.RED +
+                                            "Failed to collect CoreProtect evidence."
+                            )
+                    );
+
+                    exception.printStackTrace();
+
+                    return null;
+                });
+    }
+
+    private void collectVulcan(
+            Player player,
+            Case caseFile
+    ) {
+
+        if (!plugin.getEvidenceIntegrationService()
+                .isVulcanAvailable()) {
+
+            player.sendMessage(
+                    ChatColor.RED +
+                            "Vulcan integration is not available."
+            );
+
+            return;
+        }
+
+        plugin.getEvidenceIntegrationService()
+                .collectVulcanEvidence(
+                        caseFile.getId(),
+                        caseFile.getTargetUuid(),
+                        caseFile.getTargetName(),
+                        player.getUniqueId(),
+                        player.getName()
+                )
+                .thenAccept(success ->
+                        Bukkit.getScheduler().runTask(
+                                plugin,
+                                () -> {
+
+                                    if (success) {
+
+                                        player.sendMessage(
+                                                ChatColor.GREEN +
+                                                        "Vulcan evidence collected successfully."
+                                        );
+
+                                    } else {
+
+                                        player.sendMessage(
+                                                ChatColor.YELLOW +
+                                                        "Vulcan returned no evidence."
+                                        );
+                                    }
+                                }
+                        )
+                )
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> player.sendMessage(
+                                    ChatColor.RED +
+                                            "Failed to collect Vulcan evidence."
+                            )
+                    );
+
+                    exception.printStackTrace();
+
+                    return null;
+                });
+    }
+    private void collectLiteBans(
+            Player player,
+            Case caseFile
+    ) {
+
+        if (!plugin.getEvidenceIntegrationService()
+                .isLiteBansAvailable()) {
+
+            player.sendMessage(
+                    ChatColor.RED +
+                            "LiteBans integration is not available."
+            );
+
+            return;
+        }
+
+        plugin.getEvidenceIntegrationService()
+                .collectLiteBansEvidence(
+                        caseFile.getId(),
+                        caseFile.getTargetUuid(),
+                        caseFile.getTargetName(),
+                        PUNISHMENT_LIMIT,
+                        player.getUniqueId(),
+                        player.getName()
+                )
+                .thenAccept(success ->
+                        Bukkit.getScheduler().runTask(
+                                plugin,
+                                () -> {
+
+                                    if (success) {
+
+                                        player.sendMessage(
+                                                ChatColor.GREEN +
+                                                        "LiteBans evidence collected successfully."
+                                        );
+
+                                    } else {
+
+                                        player.sendMessage(
+                                                ChatColor.YELLOW +
+                                                        "LiteBans returned no punishment history."
+                                        );
+                                    }
+                                }
+                        )
+                )
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> player.sendMessage(
+                                    ChatColor.RED +
+                                            "Failed to collect LiteBans evidence."
+                            )
+                    );
+
+                    exception.printStackTrace();
+
+                    return null;
+                });
+    }
+
+    private void collectAll(
+            Player player,
+            Case caseFile
+    ) {
+
+        boolean coreProtectAvailable =
+                plugin.getEvidenceIntegrationService()
+                        .isCoreProtectAvailable();
+
+        boolean vulcanAvailable =
+                plugin.getEvidenceIntegrationService()
+                        .isVulcanAvailable();
+
+        boolean liteBansAvailable =
+                plugin.getEvidenceIntegrationService()
+                        .isLiteBansAvailable();
+
+        if (!coreProtectAvailable &&
+                !vulcanAvailable &&
+                !liteBansAvailable) {
+
+            player.sendMessage(
+                    ChatColor.RED +
+                            "No evidence integrations are currently available."
+            );
+
+            return;
+        }
+
+        player.sendMessage(
+                ChatColor.YELLOW +
+                        "Collecting evidence from all available integrations..."
+        );
+
+        player.sendMessage(
+                ChatColor.GRAY +
+                        "Available: " +
+                        plugin.getEvidenceIntegrationService()
+                                .getAvailableIntegrations()
+        );
+
+        plugin.getEvidenceIntegrationService()
+                .collectAllEvidence(
+                        caseFile.getId(),
+                        caseFile.getTargetUuid(),
+                        caseFile.getTargetName(),
+                        COREPROTECT_TIME_SECONDS,
+                        COREPROTECT_LIMIT,
+                        PUNISHMENT_LIMIT,
+                        player.getUniqueId(),
+                        player.getName()
+                )
+                .thenAccept(success ->
+                        Bukkit.getScheduler().runTask(
+                                plugin,
+                                () -> {
+
+                                    if (success) {
+
+                                        player.sendMessage(
+                                                ChatColor.GREEN +
+                                                        "Evidence collection completed."
+                                        );
+
+                                        player.sendMessage(
+                                                ChatColor.GRAY +
+                                                        "Use " +
+                                                        ChatColor.WHITE +
+                                                        "/case evidence list " +
+                                                        caseFile.getId() +
+                                                        ChatColor.GRAY +
+                                                        " to view the collected evidence."
+                                        );
+
+                                    } else {
+
+                                        player.sendMessage(
+                                                ChatColor.YELLOW +
+                                                        "Evidence collection completed, but no evidence was collected."
+                                        );
+                                    }
+                                }
+                        )
+                )
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> player.sendMessage(
+                                    ChatColor.RED +
+                                            "Evidence collection failed."
+                            )
+                    );
+
+                    exception.printStackTrace();
+
+                    return null;
+                });
+    }
+
+    private void sendEvidenceCollectionStarted(
+            Player player,
+            Case caseFile,
+            String source
+    ) {
+
+        player.sendMessage(
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
+        );
+
+        player.sendMessage(
+                ChatColor.GOLD +
+                        "Evidence Collection"
+        );
+
+        player.sendMessage("");
+
+        player.sendMessage(
+                ChatColor.GRAY +
+                        "Case: " +
+                        ChatColor.WHITE +
+                        "#" +
+                        caseFile.getId()
+        );
+
+        player.sendMessage(
+                ChatColor.GRAY +
+                        "Target: " +
+                        ChatColor.WHITE +
+                        caseFile.getTargetName()
+        );
+
+        player.sendMessage(
+                ChatColor.GRAY +
+                        "Source: " +
+                        ChatColor.WHITE +
+                        source.toUpperCase()
+        );
+
+        player.sendMessage(
+                ChatColor.YELLOW +
+                        "Collection started..."
+        );
+
+        player.sendMessage(
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
+        );
+    }
+
     private void handleStatus(
             CommandSender sender,
             String[] args
@@ -1041,6 +1587,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                     return null;
                 });
     }
+
     private void handleAssign(
             CommandSender sender,
             String[] args
@@ -1328,7 +1875,6 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                     return null;
                 });
     }
-
     private void handleInvestigators(
             CommandSender sender,
             String[] args
@@ -1397,7 +1943,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                                             plugin,
                                             () -> sendInvestigators(
                                                     sender,
-                                                    caseId,
+                                                    caseFile,
                                                     investigators
                                             )
                                     )
@@ -1440,21 +1986,35 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
     ) {
 
         player.sendMessage(
-                ChatColor.GREEN +
-                        "Case status updated successfully."
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
         );
 
         player.sendMessage(
+                ChatColor.GREEN +
+                        "Case Status Updated"
+        );
+
+        player.sendMessage("");
+
+        player.sendMessage(
                 ChatColor.GRAY +
-                        "Case: #" +
+                        "Case: " +
+                        ChatColor.WHITE +
+                        "#" +
                         caseFile.getId()
         );
 
         player.sendMessage(
                 ChatColor.GRAY +
-                        "New status: " +
+                        "Status: " +
                         ChatColor.YELLOW +
                         caseFile.getStatus().name()
+        );
+
+        player.sendMessage(
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
         );
     }
 
@@ -1470,15 +2030,17 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         player.sendMessage(
                 ChatColor.GRAY +
-                        "Case: #" +
-                        investigator.getCaseId()
+                        "Player: " +
+                        ChatColor.WHITE +
+                        investigator.getInvestigatorName()
         );
 
         player.sendMessage(
                 ChatColor.GRAY +
-                        "Investigator: " +
+                        "Case: " +
                         ChatColor.WHITE +
-                        investigator.getInvestigatorName()
+                        "#" +
+                        investigator.getCaseId()
         );
     }
 
@@ -1495,21 +2057,23 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         player.sendMessage(
                 ChatColor.GRAY +
-                        "Case: #" +
-                        caseId
+                        "Player: " +
+                        ChatColor.WHITE +
+                        investigatorName
         );
 
         player.sendMessage(
                 ChatColor.GRAY +
-                        "Investigator: " +
+                        "Case: " +
                         ChatColor.WHITE +
-                        investigatorName
+                        "#" +
+                        caseId
         );
     }
 
     private void sendInvestigators(
             CommandSender sender,
-            long caseId,
+            Case caseFile,
             List<CaseInvestigator> investigators
     ) {
 
@@ -1520,13 +2084,15 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage(
                 ChatColor.GOLD +
-                        "Investigators — Case #" +
-                        caseId
+                        "Case #" +
+                        caseFile.getId() +
+                        " Investigators"
         );
 
         sender.sendMessage("");
 
-        if (investigators.isEmpty()) {
+        if (investigators == null ||
+                investigators.isEmpty()) {
 
             sender.sendMessage(
                     ChatColor.GRAY +
@@ -1539,24 +2105,24 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                     investigators) {
 
                 sender.sendMessage(
-                        ChatColor.YELLOW +
+                        ChatColor.GRAY +
                                 "• " +
                                 ChatColor.WHITE +
                                 investigator.getInvestigatorName() +
-                                ChatColor.GRAY +
+                                ChatColor.DARK_GRAY +
                                 " — assigned " +
+                                ChatColor.GRAY +
                                 investigator.getAssignedAt()
                 );
             }
         }
-
-        sender.sendMessage("");
 
         sender.sendMessage(
                 ChatColor.DARK_GRAY +
                         "━━━━━━━━━━━━━━━━━━━━"
         );
     }
+
     private void sendEvidenceCreated(
             Player player,
             CaseEvidence evidence
@@ -1569,7 +2135,9 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         player.sendMessage(
                 ChatColor.GRAY +
-                        "Evidence ID: #" +
+                        "Evidence ID: " +
+                        ChatColor.WHITE +
+                        "#" +
                         evidence.getId()
         );
 
@@ -1583,6 +2151,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
     private void sendEvidenceList(
             CommandSender sender,
+            Case caseFile,
             List<CaseEvidence> evidenceList
     ) {
 
@@ -1593,46 +2162,66 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage(
                 ChatColor.GOLD +
-                        "Case Evidence"
+                        "Case #" +
+                        caseFile.getId() +
+                        " Evidence"
         );
 
         sender.sendMessage("");
 
-        if (evidenceList.isEmpty()) {
+        if (evidenceList == null ||
+                evidenceList.isEmpty()) {
 
             sender.sendMessage(
                     ChatColor.GRAY +
-                            "No evidence has been added."
+                            "No evidence has been added to this case."
             );
 
-        } else {
+            sender.sendMessage(
+                    ChatColor.DARK_GRAY +
+                            "━━━━━━━━━━━━━━━━━━━━"
+            );
 
-            for (CaseEvidence evidence :
-                    evidenceList) {
-
-                sender.sendMessage(
-                        ChatColor.YELLOW +
-                                "#" +
-                                evidence.getId() +
-                                ChatColor.GRAY +
-                                " [" +
-                                evidence.getType() +
-                                "] " +
-                                ChatColor.WHITE +
-                                evidence.getContent()
-                );
-
-                sender.sendMessage(
-                        ChatColor.DARK_GRAY +
-                                "Added by " +
-                                evidence.getAddedByName() +
-                                " at " +
-                                evidence.getCreatedAt()
-                );
-            }
+            return;
         }
 
-        sender.sendMessage("");
+        for (CaseEvidence evidence :
+                evidenceList) {
+
+            sender.sendMessage(
+                    ChatColor.YELLOW +
+                            "#" +
+                            evidence.getId() +
+                            ChatColor.GRAY +
+                            " [" +
+                            ChatColor.WHITE +
+                            evidence.getType() +
+                            ChatColor.GRAY +
+                            "]"
+            );
+
+            sender.sendMessage(
+                    ChatColor.GRAY +
+                            "Added by: " +
+                            ChatColor.WHITE +
+                            evidence.getAddedByName()
+            );
+
+            sender.sendMessage(
+                    ChatColor.GRAY +
+                            "Content: " +
+                            ChatColor.WHITE +
+                            evidence.getContent()
+            );
+
+            sender.sendMessage(
+                    ChatColor.DARK_GRAY +
+                            "Added: " +
+                            evidence.getCreatedAt()
+            );
+
+            sender.sendMessage("");
+        }
 
         sender.sendMessage(
                 ChatColor.DARK_GRAY +
@@ -1647,12 +2236,14 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         player.sendMessage(
                 ChatColor.GREEN +
-                        "Note added successfully."
+                        "Case note added successfully."
         );
 
         player.sendMessage(
                 ChatColor.GRAY +
-                        "Note ID: #" +
+                        "Note ID: " +
+                        ChatColor.WHITE +
+                        "#" +
                         note.getId()
         );
     }
@@ -1663,13 +2254,22 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
     ) {
 
         player.sendMessage(
-                ChatColor.GREEN +
-                        "Case created successfully."
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
         );
 
         player.sendMessage(
+                ChatColor.GREEN +
+                        "Case Created"
+        );
+
+        player.sendMessage("");
+
+        player.sendMessage(
                 ChatColor.GRAY +
-                        "Case ID: #" +
+                        "Case ID: " +
+                        ChatColor.WHITE +
+                        "#" +
                         caseFile.getId()
         );
 
@@ -1685,6 +2285,28 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                         "Reason: " +
                         ChatColor.WHITE +
                         caseFile.getReason()
+        );
+
+        player.sendMessage(
+                ChatColor.GRAY +
+                        "Status: " +
+                        ChatColor.YELLOW +
+                        caseFile.getStatus().name()
+        );
+
+        player.sendMessage("");
+
+        player.sendMessage(
+                ChatColor.GRAY +
+                        "View it with " +
+                        ChatColor.WHITE +
+                        "/case view " +
+                        caseFile.getId()
+        );
+
+        player.sendMessage(
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
         );
     }
 
@@ -1729,16 +2351,16 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage(
                 ChatColor.GRAY +
-                        "Status: " +
-                        ChatColor.YELLOW +
-                        caseFile.getStatus().name()
+                        "Reason: " +
+                        ChatColor.WHITE +
+                        caseFile.getReason()
         );
 
         sender.sendMessage(
                 ChatColor.GRAY +
-                        "Reason: " +
-                        ChatColor.WHITE +
-                        caseFile.getReason()
+                        "Status: " +
+                        ChatColor.YELLOW +
+                        caseFile.getStatus().name()
         );
 
         sender.sendMessage(
@@ -1758,6 +2380,30 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("");
 
         sender.sendMessage(
+                ChatColor.GRAY +
+                        "Timeline: " +
+                        ChatColor.WHITE +
+                        "/case timeline " +
+                        caseFile.getId()
+        );
+
+        sender.sendMessage(
+                ChatColor.GRAY +
+                        "Evidence: " +
+                        ChatColor.WHITE +
+                        "/case evidence list " +
+                        caseFile.getId()
+        );
+
+        sender.sendMessage(
+                ChatColor.GRAY +
+                        "Investigators: " +
+                        ChatColor.WHITE +
+                        "/case investigators " +
+                        caseFile.getId()
+        );
+
+        sender.sendMessage(
                 ChatColor.DARK_GRAY +
                         "━━━━━━━━━━━━━━━━━━━━"
         );
@@ -1775,40 +2421,48 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage(
                 ChatColor.GOLD +
-                        "Recent Cases"
+                        "Moderation Cases"
         );
 
         sender.sendMessage("");
 
-        if (cases.isEmpty()) {
+        if (cases == null || cases.isEmpty()) {
 
             sender.sendMessage(
                     ChatColor.GRAY +
                             "No cases found."
             );
 
-        } else {
+            sender.sendMessage(
+                    ChatColor.DARK_GRAY +
+                            "━━━━━━━━━━━━━━━━━━━━"
+            );
 
-            for (Case caseFile : cases) {
+            return;
+        }
 
-                sender.sendMessage(
-                        ChatColor.YELLOW +
-                                "#" +
-                                caseFile.getId() +
-                                ChatColor.GRAY +
-                                " [" +
-                                caseFile.getStatus().name() +
-                                "] " +
-                                ChatColor.WHITE +
-                                caseFile.getTargetName()
-                );
+        for (Case caseFile : cases) {
 
-                sender.sendMessage(
-                        ChatColor.DARK_GRAY +
-                                "Reason: " +
-                                caseFile.getReason()
-                );
-            }
+            sender.sendMessage(
+                    ChatColor.YELLOW +
+                            "#" +
+                            caseFile.getId() +
+                            ChatColor.GRAY +
+                            " | " +
+                            ChatColor.WHITE +
+                            caseFile.getTargetName() +
+                            ChatColor.GRAY +
+                            " | " +
+                            ChatColor.YELLOW +
+                            caseFile.getStatus().name()
+            );
+
+            sender.sendMessage(
+                    ChatColor.GRAY +
+                            "  Reason: " +
+                            ChatColor.WHITE +
+                            caseFile.getReason()
+            );
         }
 
         sender.sendMessage("");
@@ -1821,7 +2475,8 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
     private void sendTimeline(
             CommandSender sender,
-            List<CaseTimelineEntry> entries
+            Case caseFile,
+            List<CaseTimelineEntry> timeline
     ) {
 
         sender.sendMessage(
@@ -1831,56 +2486,66 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage(
                 ChatColor.GOLD +
-                        "Case Timeline"
+                        "Case #" +
+                        caseFile.getId() +
+                        " Timeline"
         );
 
         sender.sendMessage("");
 
-        if (entries.isEmpty()) {
+        if (timeline == null ||
+                timeline.isEmpty()) {
 
             sender.sendMessage(
                     ChatColor.GRAY +
                             "No timeline entries found."
             );
 
-        } else {
+            sender.sendMessage(
+                    ChatColor.DARK_GRAY +
+                            "━━━━━━━━━━━━━━━━━━━━"
+            );
 
-            for (CaseTimelineEntry entry :
-                    entries) {
+            return;
+        }
 
-                sender.sendMessage(
-                        ChatColor.YELLOW +
-                                entry.getAction()
-                );
+        for (CaseTimelineEntry entry :
+                timeline) {
+
+            String actor =
+                    entry.getActorName() == null
+                            ? "System"
+                            : entry.getActorName();
+
+            sender.sendMessage(
+                    ChatColor.YELLOW +
+                            entry.getAction()
+            );
+
+            sender.sendMessage(
+                    ChatColor.GRAY +
+                            "Actor: " +
+                            ChatColor.WHITE +
+                            actor
+            );
+
+            if (entry.getDetails() != null &&
+                    !entry.getDetails().isBlank()) {
 
                 sender.sendMessage(
                         ChatColor.GRAY +
-                                "Actor: " +
+                                "Details: " +
                                 ChatColor.WHITE +
-                                (entry.getActorName() == null
-                                        ? "System"
-                                        : entry.getActorName())
+                                entry.getDetails()
                 );
-
-                if (entry.getDetails() != null
-                        && !entry.getDetails().isBlank()) {
-
-                    sender.sendMessage(
-                            ChatColor.GRAY +
-                                    "Details: " +
-                                    ChatColor.WHITE +
-                                    entry.getDetails()
-                    );
-                }
-
-                sender.sendMessage(
-                        ChatColor.DARK_GRAY +
-                                "Time: " +
-                                entry.getCreatedAt()
-                );
-
-                sender.sendMessage("");
             }
+
+            sender.sendMessage(
+                    ChatColor.DARK_GRAY +
+                            entry.getCreatedAt().toString()
+            );
+
+            sender.sendMessage("");
         }
 
         sender.sendMessage(
@@ -1905,80 +2570,54 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage("");
 
-        if (sender.hasPermission("casemanager.create")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case create <player> <reason>"
-            );
-        }
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case create <player> <reason>"
+        );
 
-        if (sender.hasPermission("casemanager.view")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case view <id>"
-            );
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case view <id>"
+        );
 
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case timeline <id>"
-            );
-        }
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case list"
+        );
 
-        if (sender.hasPermission("casemanager.list")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case list [limit]"
-            );
-        }
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case timeline <id>"
+        );
 
-        if (sender.hasPermission("casemanager.note")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case note <id> <note>"
-            );
-        }
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case note <id> <note>"
+        );
 
-        if (sender.hasPermission("casemanager.evidence")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case evidence add <id> <type> <content>"
-            );
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case evidence add <id> <type> <content>"
+        );
 
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case evidence list <id>"
-            );
-        }
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case evidence list <id>"
+        );
 
-        if (sender.hasPermission("casemanager.assign")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case assign <id> <player>"
-            );
-        }
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case evidence collect <id> <all|coreprotect|vulcan|litebans>"
+        )
+sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case investigators <id>"
+        );
 
-        if (sender.hasPermission("casemanager.unassign")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case unassign <id> <player>"
-            );
-        }
-
-        if (sender.hasPermission("casemanager.investigators")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case investigators <id>"
-            );
-        }
-
-        if (sender.hasPermission("casemanager.status")) {
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "/case status <id> <status>"
-            );
-        }
-
-        sender.sendMessage("");
+        sender.sendMessage(
+                ChatColor.YELLOW +
+                        "/case status <id> <status>"
+        );
 
         sender.sendMessage(
                 ChatColor.DARK_GRAY +
@@ -2006,184 +2645,93 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         if (args.length == 1) {
 
-            List<String> commands =
-                    new ArrayList<>();
-
-            if (sender.hasPermission("casemanager.create")) {
-                commands.add("create");
-            }
-
-            if (sender.hasPermission("casemanager.view")) {
-                commands.add("view");
-                commands.add("timeline");
-            }
-
-            if (sender.hasPermission("casemanager.list")) {
-                commands.add("list");
-            }
-
-            if (sender.hasPermission("casemanager.note")) {
-                commands.add("note");
-            }
-
-            if (sender.hasPermission("casemanager.evidence")) {
-                commands.add("evidence");
-            }
-
-            if (sender.hasPermission("casemanager.assign")) {
-                commands.add("assign");
-            }
-
-            if (sender.hasPermission("casemanager.unassign")) {
-                commands.add("unassign");
-            }
-
-            if (sender.hasPermission("casemanager.investigators")) {
-                commands.add("investigators");
-            }
-
-            if (sender.hasPermission("casemanager.status")) {
-                commands.add("status");
-            }
-
             return filter(
-                    commands,
+                    Arrays.asList(
+                            "create",
+                            "view",
+                            "list",
+                            "timeline",
+                            "note",
+                            "evidence",
+                            "assign",
+                            "unassign",
+                            "investigators",
+                            "status"
+                    ),
                     args[0]
             );
         }
 
-        String subCommand =
-                args[0].toLowerCase();
+        if (args.length >= 2 &&
+                args[0].equalsIgnoreCase("evidence")) {
 
-        if (subCommand.equals("create")
-                && args.length == 2
-                && sender.hasPermission("casemanager.create")) {
+            if (args.length == 2) {
 
-            List<String> players =
-                    new ArrayList<>();
-
-            for (Player player :
-                    Bukkit.getOnlinePlayers()) {
-
-                players.add(
-                        player.getName()
+                return filter(
+                        Arrays.asList(
+                                "add",
+                                "list",
+                                "collect"
+                        ),
+                        args[1]
                 );
             }
 
-            return filter(
-                    players,
-                    args[1]
-            );
-        }
+            if (args[1].equalsIgnoreCase("add")) {
 
-        if (subCommand.equals("list")
-                && args.length == 2
-                && sender.hasPermission("casemanager.list")) {
+                if (args.length == 3) {
 
-            return filter(
-                    Arrays.asList(
-                            "10",
-                            "20",
-                            "30",
-                            "40",
-                            "50"
-                    ),
-                    args[1]
-            );
-        }
+                    return filter(
+                            evidenceTypes,
+                            args[2]
+                    );
+                }
+            }
 
-        if ((subCommand.equals("view")
-                || subCommand.equals("timeline"))
-                && args.length == 2
-                && sender.hasPermission("casemanager.view")) {
+            if (args[1].equalsIgnoreCase("collect")) {
+
+                if (args.length == 4) {
+
+                    return filter(
+                            evidenceCollectionTypes,
+                            args[3]
+                    );
+                }
+            }
 
             return Collections.emptyList();
         }
 
-        if (subCommand.equals("note")
-                && args.length == 2
-                && sender.hasPermission("casemanager.note")) {
-
-            return Collections.emptyList();
-        }
-
-        if (subCommand.equals("evidence")
-                && args.length == 2
-                && sender.hasPermission("casemanager.evidence")) {
-
-            return filter(
-                    Arrays.asList(
-                            "add",
-                            "list"
-                    ),
-                    args[1]
-            );
-        }
-
-        if (subCommand.equals("evidence")
-                && args.length == 3
-                && args[1].equalsIgnoreCase("add")
-                && sender.hasPermission("casemanager.evidence")) {
-
-            return filter(
-                    evidenceTypes,
-                    args[2]
-            );
-        }
-
-        if (subCommand.equals("assign")
-                && args.length == 2
-                && sender.hasPermission("casemanager.assign")) {
-
-            return Collections.emptyList();
-        }
-
-        if (subCommand.equals("assign")
-                && args.length == 3
-                && sender.hasPermission("casemanager.assign")) {
-
-            return onlinePlayers(
-                    args[2]
-            );
-        }
-
-        if (subCommand.equals("unassign")
-                && args.length == 2
-                && sender.hasPermission("casemanager.unassign")) {
-
-            return Collections.emptyList();
-        }
-
-        if (subCommand.equals("unassign")
-                && args.length == 3
-                && sender.hasPermission("casemanager.unassign")) {
-
-            return onlinePlayers(
-                    args[2]
-            );
-        }
-
-        if (subCommand.equals("investigators")
-                && args.length == 2
-                && sender.hasPermission("casemanager.investigators")) {
-
-            return Collections.emptyList();
-        }
-
-        if (subCommand.equals("status")
-                && args.length == 2
-                && sender.hasPermission("casemanager.status")) {
-
-            return Collections.emptyList();
-        }
-
-        if (subCommand.equals("status")
-                && args.length == 3
-                && sender.hasPermission("casemanager.status")) {
+        if (args.length == 2 &&
+                args[0].equalsIgnoreCase("status")) {
 
             return filter(
                     statusNames,
-                    args[2]
+                    args[1]
+            );
+        }
+
+        if (args.length == 2 &&
+                (args[0].equalsIgnoreCase("view")
+                        || args[0].equalsIgnoreCase("timeline")
+                        || args[0].equalsIgnoreCase("note")
+                        || args[0].equalsIgnoreCase("investigators"))) {
+
+            return Collections.emptyList();
+        }
+
+        if (args.length == 2 &&
+                (args[0].equalsIgnoreCase("assign")
+                        || args[0].equalsIgnoreCase("unassign"))) {
+
+            return Collections.emptyList();
+        }
+
+        if (args.length == 2 &&
+                args[0].equalsIgnoreCase("create")) {
+
+            return onlinePlayers(
+                    args[1]
             );
         }
 
@@ -2200,15 +2748,19 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
         for (Player player :
                 Bukkit.getOnlinePlayers()) {
 
-            players.add(
-                    player.getName()
-            );
+            if (player.getName()
+                    .toLowerCase()
+                    .startsWith(
+                            input.toLowerCase()
+                    )) {
+
+                players.add(
+                        player.getName()
+                );
+            }
         }
 
-        return filter(
-                players,
-                input
-        );
+        return players;
     }
 
     private List<String> filter(
@@ -2216,16 +2768,23 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             String input
     ) {
 
+        if (input == null ||
+                input.isEmpty()) {
+
+            return new ArrayList<>(
+                    values
+            );
+        }
+
         List<String> result =
                 new ArrayList<>();
-
-        String lowerInput =
-                input.toLowerCase();
 
         for (String value : values) {
 
             if (value.toLowerCase()
-                    .startsWith(lowerInput)) {
+                    .startsWith(
+                            input.toLowerCase()
+                    )) {
 
                 result.add(value);
             }
