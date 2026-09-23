@@ -30,9 +30,9 @@ public final class IntegrationManager {
 
         detectedPlugins.clear();
 
-        detectPlugin("CoreProtect");
-        detectPlugin("Vulcan");
-        detectPlugin("LiteBans");
+        coreProtectIntegration = null;
+        vulcanIntegration = null;
+        liteBansIntegration = null;
 
         initializeCoreProtect();
         initializeVulcan();
@@ -43,49 +43,24 @@ public final class IntegrationManager {
         );
     }
 
-    private void detectPlugin(
-            String pluginName
-    ) {
-
-        Plugin externalPlugin =
-                plugin.getServer()
-                        .getPluginManager()
-                        .getPlugin(pluginName);
-
-        if (externalPlugin == null) {
-
-            plugin.getLogger().info(
-                    pluginName +
-                            " not found. Integration disabled."
-            );
-
-            return;
-        }
-
-        if (!externalPlugin.isEnabled()) {
-
-            plugin.getLogger().warning(
-                    pluginName +
-                            " is installed but not enabled."
-            );
-
-            return;
-        }
-
-        detectedPlugins.put(
-                pluginName.toLowerCase(),
-                externalPlugin
-        );
-
-        plugin.getLogger().info(
-                pluginName +
-                        " detected."
-        );
-    }
-
     private void initializeCoreProtect() {
 
-        if (!isPluginDetected("CoreProtect")) {
+        boolean enabled =
+                plugin.getConfig().getBoolean(
+                        "integrations.coreprotect.enabled",
+                        true
+                );
+
+        if (!enabled) {
+
+            plugin.getLogger().info(
+                    "CoreProtect integration is disabled by configuration."
+            );
+
+            return;
+        }
+
+        if (!detectPlugin("CoreProtect")) {
             return;
         }
 
@@ -118,7 +93,7 @@ public final class IntegrationManager {
 
             plugin.getLogger().warning(
                     "Failed to initialize CoreProtect integration: " +
-                            exception.getMessage()
+                            getExceptionMessage(exception)
             );
 
             coreProtectIntegration = null;
@@ -127,7 +102,22 @@ public final class IntegrationManager {
 
     private void initializeVulcan() {
 
-        if (!isPluginDetected("Vulcan")) {
+        boolean enabled =
+                plugin.getConfig().getBoolean(
+                        "integrations.vulcan.enabled",
+                        true
+                );
+
+        if (!enabled) {
+
+            plugin.getLogger().info(
+                    "Vulcan integration is disabled by configuration."
+            );
+
+            return;
+        }
+
+        if (!detectPlugin("Vulcan")) {
             return;
         }
 
@@ -151,13 +141,15 @@ public final class IntegrationManager {
                 plugin.getLogger().warning(
                         "Vulcan was detected, but its API is unavailable."
                 );
+
+                vulcanIntegration = null;
             }
 
         } catch (Exception exception) {
 
             plugin.getLogger().warning(
                     "Failed to initialize Vulcan integration: " +
-                            exception.getMessage()
+                            getExceptionMessage(exception)
             );
 
             vulcanIntegration = null;
@@ -166,7 +158,22 @@ public final class IntegrationManager {
 
     private void initializeLiteBans() {
 
-        if (!isPluginDetected("LiteBans")) {
+        boolean enabled =
+                plugin.getConfig().getBoolean(
+                        "integrations.litebans.enabled",
+                        true
+                );
+
+        if (!enabled) {
+
+            plugin.getLogger().info(
+                    "LiteBans integration is disabled by configuration."
+            );
+
+            return;
+        }
+
+        if (!detectPlugin("LiteBans")) {
             return;
         }
 
@@ -190,17 +197,67 @@ public final class IntegrationManager {
                 plugin.getLogger().warning(
                         "LiteBans was detected, but its API is unavailable."
                 );
+
+                liteBansIntegration = null;
             }
 
         } catch (Exception exception) {
 
             plugin.getLogger().warning(
                     "Failed to initialize LiteBans integration: " +
-                            exception.getMessage()
+                            getExceptionMessage(exception)
             );
 
             liteBansIntegration = null;
         }
+    }
+
+    private boolean detectPlugin(
+            String pluginName
+    ) {
+
+        if (pluginName == null ||
+                pluginName.isBlank()) {
+
+            return false;
+        }
+
+        Plugin externalPlugin =
+                plugin.getServer()
+                        .getPluginManager()
+                        .getPlugin(pluginName);
+
+        if (externalPlugin == null) {
+
+            plugin.getLogger().info(
+                    pluginName +
+                            " not found. Integration unavailable."
+            );
+
+            return false;
+        }
+
+        if (!externalPlugin.isEnabled()) {
+
+            plugin.getLogger().warning(
+                    pluginName +
+                            " is installed but not enabled."
+            );
+
+            return false;
+        }
+
+        detectedPlugins.put(
+                pluginName.toLowerCase(),
+                externalPlugin
+        );
+
+        plugin.getLogger().info(
+                pluginName +
+                        " detected."
+        );
+
+        return true;
     }
 
     private boolean isPluginDetected(
@@ -224,8 +281,8 @@ public final class IntegrationManager {
             return false;
         }
 
-        return detectedPlugins.containsKey(
-                pluginName.toLowerCase()
+        return isPluginDetected(
+                pluginName
         );
     }
 
@@ -293,5 +350,34 @@ public final class IntegrationManager {
         plugin.getLogger().info(
                 "Integration manager shut down."
         );
+    }
+
+    private String getExceptionMessage(
+            Throwable throwable
+    ) {
+
+        if (throwable == null) {
+            return "Unknown error";
+        }
+
+        Throwable current =
+                throwable;
+
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+
+        String message =
+                current.getMessage();
+
+        if (message == null ||
+                message.isBlank()) {
+
+            return current
+                    .getClass()
+                    .getSimpleName();
+        }
+
+        return message;
     }
 }
