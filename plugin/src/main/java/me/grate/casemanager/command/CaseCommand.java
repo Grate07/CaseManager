@@ -5,6 +5,7 @@ import me.grate.casemanager.casefile.Case;
 import me.grate.casemanager.casefile.CaseEvidence;
 import me.grate.casemanager.casefile.CaseInvestigator;
 import me.grate.casemanager.casefile.CaseNote;
+import me.grate.casemanager.casefile.CaseStatus;
 import me.grate.casemanager.casefile.CaseTimelineEntry;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -19,7 +20,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 public final class CaseCommand implements CommandExecutor, TabCompleter {
 
@@ -34,6 +34,15 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             "LITEBANS",
             "OBSERVATION",
             "OTHER"
+    );
+
+    private final List<String> statusNames = Arrays.asList(
+            "OPEN",
+            "INVESTIGATING",
+            "WAITING_FOR_EVIDENCE",
+            "ESCALATED",
+            "RESOLVED",
+            "CLOSED"
     );
 
     public CaseCommand(CaseManager plugin) {
@@ -92,6 +101,10 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
             case "investigators":
                 handleInvestigators(sender, args);
+                break;
+
+            case "status":
+                handleStatus(sender, args);
                 break;
 
             default:
@@ -405,53 +418,52 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        CompletableFuture<Case> caseFuture =
-                plugin.getCaseService()
-                        .getCase(caseId);
+        plugin.getCaseService()
+                .getCase(caseId)
+                .thenAccept(caseFile -> {
 
-        caseFuture.thenAccept(caseFile -> {
+                    if (caseFile == null) {
 
-            if (caseFile == null) {
+                        Bukkit.getScheduler().runTask(
+                                plugin,
+                                () -> sender.sendMessage(
+                                        ChatColor.RED +
+                                                "Case #" +
+                                                caseId +
+                                                " does not exist."
+                                )
+                        );
 
-                Bukkit.getScheduler().runTask(
-                        plugin,
-                        () -> sender.sendMessage(
-                                ChatColor.RED +
-                                        "Case #" +
-                                        caseId +
-                                        " does not exist."
-                        )
-                );
+                        return;
+                    }
 
-                return;
-            }
-
-            plugin.getCaseTimelineService()
-                    .getTimeline(caseId)
-                    .thenAccept(entries ->
-                            Bukkit.getScheduler().runTask(
-                                    plugin,
-                                    () -> sendTimeline(
-                                            sender,
-                                            entries
+                    plugin.getCaseTimelineService()
+                            .getTimeline(caseId)
+                            .thenAccept(entries ->
+                                    Bukkit.getScheduler().runTask(
+                                            plugin,
+                                            () -> sendTimeline(
+                                                    sender,
+                                                    entries
+                                            )
                                     )
+                            );
+
+                })
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> sender.sendMessage(
+                                    ChatColor.RED +
+                                            "Failed to retrieve the timeline."
                             )
                     );
 
-        }).exceptionally(exception -> {
+                    exception.printStackTrace();
 
-            Bukkit.getScheduler().runTask(
-                    plugin,
-                    () -> sender.sendMessage(
-                            ChatColor.RED +
-                                    "Failed to retrieve the timeline."
-                    )
-            );
-
-            exception.printStackTrace();
-
-            return null;
-        });
+                    return null;
+                });
     }
     private void handleNote(
             CommandSender sender,
@@ -903,6 +915,132 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                 });
     }
 
+    private void handleStatus(
+            CommandSender sender,
+            String[] args
+    ) {
+
+        if (!sender.hasPermission(
+                "casemanager.status"
+        )) {
+
+            sendNoPermission(sender);
+            return;
+        }
+
+        if (!(sender instanceof Player player)) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Only players can change case status."
+            );
+
+            return;
+        }
+
+        if (args.length < 3) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Usage: /case status <id> <status>"
+            );
+
+            return;
+        }
+
+        long caseId;
+
+        try {
+
+            caseId =
+                    Long.parseLong(
+                            args[1]
+                    );
+
+        } catch (NumberFormatException exception) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Case ID must be a number."
+            );
+
+            return;
+        }
+
+        CaseStatus newStatus;
+
+        try {
+
+            newStatus =
+                    CaseStatus.valueOf(
+                            args[2].toUpperCase()
+                    );
+
+        } catch (IllegalArgumentException exception) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Invalid case status."
+            );
+
+            sender.sendMessage(
+                    ChatColor.GRAY +
+                            "Available: " +
+                            String.join(
+                                    ", ",
+                                    statusNames
+                            )
+            );
+
+            return;
+        }
+
+        plugin.getCaseService()
+                .updateStatus(
+                        caseId,
+                        newStatus,
+                        player.getUniqueId(),
+                        player.getName()
+                )
+                .thenAccept(caseFile ->
+                        Bukkit.getScheduler().runTask(
+                                plugin,
+                                () -> {
+
+                                    if (caseFile == null) {
+
+                                        player.sendMessage(
+                                                ChatColor.RED +
+                                                        "Case #" +
+                                                        caseId +
+                                                        " does not exist."
+                                        );
+
+                                        return;
+                                    }
+
+                                    sendStatusUpdated(
+                                            player,
+                                            caseFile
+                                    );
+                                }
+                        )
+                )
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> player.sendMessage(
+                                    ChatColor.RED +
+                                            "Failed to update the case status."
+                            )
+                    );
+
+                    exception.printStackTrace();
+
+                    return null;
+                });
+    }
     private void handleAssign(
             CommandSender sender,
             String[] args
@@ -955,12 +1093,9 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        String investigatorName =
-                args[2];
-
         OfflinePlayer investigator =
                 Bukkit.getOfflinePlayer(
-                        investigatorName
+                        args[2]
                 );
 
         if (!investigator.isOnline()
@@ -972,15 +1107,6 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             );
 
             return;
-        }
-
-        if (investigator.getUniqueId()
-                .equals(player.getUniqueId())) {
-
-            sender.sendMessage(
-                    ChatColor.YELLOW +
-                            "You can assign yourself as an investigator."
-            );
         }
 
         plugin.getCaseService()
@@ -1050,6 +1176,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                     return null;
                 });
     }
+
     private void handleUnassign(
             CommandSender sender,
             String[] args
@@ -1307,6 +1434,30 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                 });
     }
 
+    private void sendStatusUpdated(
+            Player player,
+            Case caseFile
+    ) {
+
+        player.sendMessage(
+                ChatColor.GREEN +
+                        "Case status updated successfully."
+        );
+
+        player.sendMessage(
+                ChatColor.GRAY +
+                        "Case: #" +
+                        caseFile.getId()
+        );
+
+        player.sendMessage(
+                ChatColor.GRAY +
+                        "New status: " +
+                        ChatColor.YELLOW +
+                        caseFile.getStatus().name()
+        );
+    }
+
     private void sendInvestigatorAssigned(
             Player player,
             CaseInvestigator investigator
@@ -1406,7 +1557,6 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                         "━━━━━━━━━━━━━━━━━━━━"
         );
     }
-
     private void sendEvidenceCreated(
             Player player,
             CaseEvidence evidence
@@ -1537,6 +1687,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                         caseFile.getReason()
         );
     }
+
     private void sendCaseDetails(
             CommandSender sender,
             Case caseFile
@@ -1754,20 +1905,14 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage("");
 
-        if (sender.hasPermission(
-                "casemanager.create"
-        )) {
-
+        if (sender.hasPermission("casemanager.create")) {
             sender.sendMessage(
                     ChatColor.YELLOW +
                             "/case create <player> <reason>"
             );
         }
 
-        if (sender.hasPermission(
-                "casemanager.view"
-        )) {
-
+        if (sender.hasPermission("casemanager.view")) {
             sender.sendMessage(
                     ChatColor.YELLOW +
                             "/case view <id>"
@@ -1779,30 +1924,21 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             );
         }
 
-        if (sender.hasPermission(
-                "casemanager.list"
-        )) {
-
+        if (sender.hasPermission("casemanager.list")) {
             sender.sendMessage(
                     ChatColor.YELLOW +
                             "/case list [limit]"
             );
         }
 
-        if (sender.hasPermission(
-                "casemanager.note"
-        )) {
-
+        if (sender.hasPermission("casemanager.note")) {
             sender.sendMessage(
                     ChatColor.YELLOW +
                             "/case note <id> <note>"
             );
         }
 
-        if (sender.hasPermission(
-                "casemanager.evidence"
-        )) {
-
+        if (sender.hasPermission("casemanager.evidence")) {
             sender.sendMessage(
                     ChatColor.YELLOW +
                             "/case evidence add <id> <type> <content>"
@@ -1814,33 +1950,31 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             );
         }
 
-        if (sender.hasPermission(
-                "casemanager.assign"
-        )) {
-
+        if (sender.hasPermission("casemanager.assign")) {
             sender.sendMessage(
                     ChatColor.YELLOW +
                             "/case assign <id> <player>"
             );
         }
 
-        if (sender.hasPermission(
-                "casemanager.unassign"
-        )) {
-
+        if (sender.hasPermission("casemanager.unassign")) {
             sender.sendMessage(
                     ChatColor.YELLOW +
                             "/case unassign <id> <player>"
             );
         }
 
-        if (sender.hasPermission(
-                "casemanager.investigators"
-        )) {
-
+        if (sender.hasPermission("casemanager.investigators")) {
             sender.sendMessage(
                     ChatColor.YELLOW +
                             "/case investigators <id>"
+            );
+        }
+
+        if (sender.hasPermission("casemanager.status")) {
+            sender.sendMessage(
+                    ChatColor.YELLOW +
+                            "/case status <id> <status>"
             );
         }
 
@@ -1875,53 +2009,41 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             List<String> commands =
                     new ArrayList<>();
 
-            if (sender.hasPermission(
-                    "casemanager.create"
-            )) {
+            if (sender.hasPermission("casemanager.create")) {
                 commands.add("create");
             }
 
-            if (sender.hasPermission(
-                    "casemanager.view"
-            )) {
+            if (sender.hasPermission("casemanager.view")) {
                 commands.add("view");
                 commands.add("timeline");
             }
 
-            if (sender.hasPermission(
-                    "casemanager.list"
-            )) {
+            if (sender.hasPermission("casemanager.list")) {
                 commands.add("list");
             }
 
-            if (sender.hasPermission(
-                    "casemanager.note"
-            )) {
+            if (sender.hasPermission("casemanager.note")) {
                 commands.add("note");
             }
 
-            if (sender.hasPermission(
-                    "casemanager.evidence"
-            )) {
+            if (sender.hasPermission("casemanager.evidence")) {
                 commands.add("evidence");
             }
 
-            if (sender.hasPermission(
-                    "casemanager.assign"
-            )) {
+            if (sender.hasPermission("casemanager.assign")) {
                 commands.add("assign");
             }
 
-            if (sender.hasPermission(
-                    "casemanager.unassign"
-            )) {
+            if (sender.hasPermission("casemanager.unassign")) {
                 commands.add("unassign");
             }
 
-            if (sender.hasPermission(
-                    "casemanager.investigators"
-            )) {
+            if (sender.hasPermission("casemanager.investigators")) {
                 commands.add("investigators");
+            }
+
+            if (sender.hasPermission("casemanager.status")) {
+                commands.add("status");
             }
 
             return filter(
@@ -1935,9 +2057,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         if (subCommand.equals("create")
                 && args.length == 2
-                && sender.hasPermission(
-                        "casemanager.create"
-                )) {
+                && sender.hasPermission("casemanager.create")) {
 
             List<String> players =
                     new ArrayList<>();
@@ -1958,9 +2078,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         if (subCommand.equals("list")
                 && args.length == 2
-                && sender.hasPermission(
-                        "casemanager.list"
-                )) {
+                && sender.hasPermission("casemanager.list")) {
 
             return filter(
                     Arrays.asList(
@@ -1977,31 +2095,21 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
         if ((subCommand.equals("view")
                 || subCommand.equals("timeline"))
                 && args.length == 2
-                && sender.hasPermission(
-                        "casemanager.view"
-                )) {
+                && sender.hasPermission("casemanager.view")) {
 
             return Collections.emptyList();
         }
 
         if (subCommand.equals("note")
                 && args.length == 2
-                && sender.hasPermission(
-                        "casemanager.note"
-                )) {
+                && sender.hasPermission("casemanager.note")) {
 
             return Collections.emptyList();
         }
 
         if (subCommand.equals("evidence")
-                && args.length == 2) {
-
-            if (!sender.hasPermission(
-                    "casemanager.evidence"
-            )) {
-
-                return Collections.emptyList();
-            }
+                && args.length == 2
+                && sender.hasPermission("casemanager.evidence")) {
 
             return filter(
                     Arrays.asList(
@@ -2015,9 +2123,7 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
         if (subCommand.equals("evidence")
                 && args.length == 3
                 && args[1].equalsIgnoreCase("add")
-                && sender.hasPermission(
-                        "casemanager.evidence"
-                )) {
+                && sender.hasPermission("casemanager.evidence")) {
 
             return filter(
                     evidenceTypes,
@@ -2027,78 +2133,82 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
         if (subCommand.equals("assign")
                 && args.length == 2
-                && sender.hasPermission(
-                        "casemanager.assign"
-                )) {
+                && sender.hasPermission("casemanager.assign")) {
 
             return Collections.emptyList();
         }
 
         if (subCommand.equals("assign")
                 && args.length == 3
-                && sender.hasPermission(
-                        "casemanager.assign"
-                )) {
+                && sender.hasPermission("casemanager.assign")) {
 
-            List<String> players =
-                    new ArrayList<>();
-
-            for (Player player :
-                    Bukkit.getOnlinePlayers()) {
-
-                players.add(
-                        player.getName()
-                );
-            }
-
-            return filter(
-                    players,
+            return onlinePlayers(
                     args[2]
             );
         }
 
         if (subCommand.equals("unassign")
                 && args.length == 2
-                && sender.hasPermission(
-                        "casemanager.unassign"
-                )) {
+                && sender.hasPermission("casemanager.unassign")) {
 
             return Collections.emptyList();
         }
 
         if (subCommand.equals("unassign")
                 && args.length == 3
-                && sender.hasPermission(
-                        "casemanager.unassign"
-                )) {
+                && sender.hasPermission("casemanager.unassign")) {
 
-            List<String> players =
-                    new ArrayList<>();
-
-            for (Player player :
-                    Bukkit.getOnlinePlayers()) {
-
-                players.add(
-                        player.getName()
-                );
-            }
-
-            return filter(
-                    players,
+            return onlinePlayers(
                     args[2]
             );
         }
 
         if (subCommand.equals("investigators")
                 && args.length == 2
-                && sender.hasPermission(
-                        "casemanager.investigators"
-                )) {
+                && sender.hasPermission("casemanager.investigators")) {
 
             return Collections.emptyList();
         }
 
+        if (subCommand.equals("status")
+                && args.length == 2
+                && sender.hasPermission("casemanager.status")) {
+
+            return Collections.emptyList();
+        }
+
+        if (subCommand.equals("status")
+                && args.length == 3
+                && sender.hasPermission("casemanager.status")) {
+
+            return filter(
+                    statusNames,
+                    args[2]
+            );
+        }
+
         return Collections.emptyList();
+    }
+
+    private List<String> onlinePlayers(
+            String input
+    ) {
+
+        List<String> players =
+                new ArrayList<>();
+
+        for (Player player :
+                Bukkit.getOnlinePlayers()) {
+
+            players.add(
+                    player.getName()
+            );
+        }
+
+        return filter(
+                players,
+                input
+        );
     }
 
     private List<String> filter(
