@@ -5,7 +5,7 @@ Advanced moderation case management for Minecraft servers.
 ## Features
 
 - Moderation case management
-- MySQL database
+- Supabase database
 - Staff investigators
 - Evidence management
 - Case timeline
@@ -28,7 +28,7 @@ CaseManager targets the Spigot API and is designed to work with:
 ## Requirements
 
 - Java 21+
-- MySQL 8+
+- Supabase
 - Spigot/Paper/Purpur server
 
 ## Development
