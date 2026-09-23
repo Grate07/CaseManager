@@ -11,9 +11,18 @@ public final class DatabaseTables {
     private DatabaseTables() {
     }
 
-    public static void createTables(CaseManager plugin, DatabaseManager database) {
-        try (Connection connection = database.getConnection();
-             Statement statement = connection.createStatement()) {
+    public static void createTables(
+            CaseManager plugin,
+            DatabaseManager database
+    ) {
+
+        try (
+                Connection connection =
+                        database.getConnection();
+
+                Statement statement =
+                        connection.createStatement()
+        ) {
 
             statement.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS cases (
@@ -76,6 +85,7 @@ public final class DatabaseTables {
                     investigator_name VARCHAR(16),
                     assigned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (case_id, investigator_uuid),
+                    INDEX idx_investigator_uuid (investigator_uuid),
                     CONSTRAINT fk_investigator_case
                         FOREIGN KEY (case_id)
                         REFERENCES cases(id)
@@ -94,6 +104,7 @@ public final class DatabaseTables {
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (id),
                     INDEX idx_timeline_case_id (case_id),
+                    INDEX idx_timeline_action (action),
                     CONSTRAINT fk_timeline_case
                         FOREIGN KEY (case_id)
                         REFERENCES cases(id)
@@ -101,11 +112,20 @@ public final class DatabaseTables {
                 )
             """);
 
-            plugin.getLogger().info("Database tables verified.");
+            plugin.getLogger().info(
+                    "Database tables verified successfully."
+            );
 
         } catch (SQLException exception) {
-            plugin.getLogger().severe("Failed to create database tables.");
-            exception.printStackTrace();
+
+            plugin.getLogger().severe(
+                    "Failed to create or verify CaseManager database tables."
+            );
+
+            throw new IllegalStateException(
+                    "Database schema initialization failed.",
+                    exception
+            );
         }
     }
 }
