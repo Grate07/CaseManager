@@ -1,10 +1,103 @@
+# ============================================================
+# CaseManager Configuration
+# ============================================================
+
 database:
+
+  # MySQL server hostname or IP.
   host: "localhost"
+
+  # MySQL server port.
   port: 3306
+
+  # Database name.
   name: "casemanager"
+
+  # Database username.
   username: "root"
+
+  # Database password.
+  #
+  # IMPORTANT:
+  # Do not commit a real production password to GitHub.
   password: "CHANGE_ME"
 
+  # Maximum number of database connections.
   pool-size: 10
 
+  # Enable SSL/TLS for the MySQL connection.
   ssl: false
+
+
+# ============================================================
+# Integrations
+# ============================================================
+
+integrations:
+
+  coreprotect:
+
+    # Enable CoreProtect integration.
+    enabled: true
+
+    # Automatically collect CoreProtect history when
+    # /case evidence collect <id> coreprotect is used.
+    evidence:
+
+      # How far back to search, in seconds.
+      #
+      # 86400 = 24 hours
+      # 604800 = 7 days
+      time-seconds: 86400
+
+      # Maximum number of CoreProtect records collected.
+      limit: 50
+
+
+  vulcan:
+
+    # Enable Vulcan integration.
+    enabled: true
+
+
+  litebans:
+
+    # Enable LiteBans integration.
+    enabled: true
+
+    # Maximum number of previous punishments collected.
+    evidence-limit: 20
+
+
+# ============================================================
+# Case Evidence
+# ============================================================
+
+evidence:
+
+  # Maximum length of manually submitted evidence content.
+  max-content-length: 10000
+
+  # Maximum number of evidence records returned by
+  # /case evidence list.
+  list-limit: 100
+
+
+# ============================================================
+# Cases
+# ============================================================
+
+cases:
+
+  # Maximum number of cases returned by /case list.
+  list-limit: 50
+
+
+# ============================================================
+# Debug
+# ============================================================
+
+debug:
+
+  # Enable additional diagnostic logging.
+  enabled: false
