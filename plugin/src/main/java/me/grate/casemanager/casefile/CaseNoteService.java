@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +32,34 @@ public final class CaseNoteService {
             String authorName,
             String content
     ) {
+
+        if (caseId <= 0) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
+
+        if (authorUuid == null) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Author UUID cannot be null."
+                    )
+            );
+        }
+
+        if (content == null ||
+                content.isBlank()) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Note content cannot be empty."
+                    )
+            );
+        }
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -76,7 +105,19 @@ public final class CaseNoteService {
                         content
                 );
 
-                statement.executeUpdate();
+                int affected =
+                        statement.executeUpdate();
+
+                if (affected != 1) {
+
+                    throw new SQLException(
+                            "Note insert affected " +
+                                    affected +
+                                    " rows."
+                    );
+                }
+
+                long noteId;
 
                 try (
                         ResultSet keys =
@@ -84,39 +125,40 @@ public final class CaseNoteService {
                 ) {
 
                     if (!keys.next()) {
+
                         throw new SQLException(
                                 "Failed to retrieve generated note ID."
                         );
                     }
 
-                    long noteId =
+                    noteId =
                             keys.getLong(1);
-
-                    Instant createdAt =
-                            Instant.now();
-
-                    CaseNote note =
-                            new CaseNote(
-                                    noteId,
-                                    caseId,
-                                    authorUuid,
-                                    authorName,
-                                    content,
-                                    createdAt
-                            );
-
-                    timelineService.addEntry(
-                            caseId,
-                            authorUuid,
-                            authorName,
-                            "NOTE_ADDED",
-                            "Note #" +
-                                    noteId +
-                                    " added."
-                    ).join();
-
-                    return note;
                 }
+
+                Instant createdAt =
+                        Instant.now();
+
+                CaseNote note =
+                        new CaseNote(
+                                noteId,
+                                caseId,
+                                authorUuid,
+                                authorName,
+                                content,
+                                createdAt
+                        );
+
+                timelineService.addEntry(
+                        caseId,
+                        authorUuid,
+                        authorName,
+                        "NOTE_ADDED",
+                        "Note #" +
+                                noteId +
+                                " added."
+                ).join();
+
+                return note;
 
             } catch (SQLException exception) {
 
@@ -131,6 +173,15 @@ public final class CaseNoteService {
     public CompletableFuture<List<CaseNote>> getNotes(
             long caseId
     ) {
+
+        if (caseId <= 0) {
+
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(
+                            "Case ID must be greater than zero."
+                    )
+            );
+        }
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -170,17 +221,56 @@ public final class CaseNoteService {
 
                     while (result.next()) {
 
-                        UUID authorUuid =
-                                UUID.fromString(
-                                        result.getString(
-                                                "author_uuid"
-                                        )
+                        String authorUuidString =
+                                result.getString(
+                                        "author_uuid"
                                 );
 
-                        Instant createdAt =
+                        if (authorUuidString == null ||
+                                authorUuidString.isBlank()) {
+
+                            throw new SQLException(
+                                    "Note #" +
+                                            result.getLong("id") +
+                                            " contains a missing author UUID."
+                            );
+                        }
+
+                        UUID authorUuid;
+
+                        try {
+
+                            authorUuid =
+                                    UUID.fromString(
+                                            authorUuidString
+                                    );
+
+                        } catch (IllegalArgumentException exception) {
+
+                            throw new SQLException(
+                                    "Note #" +
+                                            result.getLong("id") +
+                                            " contains an invalid author UUID.",
+                                    exception
+                            );
+                        }
+
+                        Timestamp timestamp =
                                 result.getTimestamp(
                                         "created_at"
-                                ).toInstant();
+                                );
+
+                        if (timestamp == null) {
+
+                            throw new SQLException(
+                                    "Note #" +
+                                            result.getLong("id") +
+                                            " has no creation timestamp."
+                            );
+                        }
+
+                        Instant createdAt =
+                                timestamp.toInstant();
 
                         CaseNote note =
                                 new CaseNote(
@@ -196,7 +286,9 @@ public final class CaseNoteService {
                                         createdAt
                                 );
 
-                        notes.add(note);
+                        notes.add(
+                                note
+                        );
                     }
                 }
 
@@ -205,7 +297,8 @@ public final class CaseNoteService {
             } catch (SQLException exception) {
 
                 throw new RuntimeException(
-                        "Failed to retrieve case notes.",
+                        "Failed to retrieve notes for case #" +
+                                caseId,
                         exception
                 );
             }
