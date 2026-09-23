@@ -2,6 +2,7 @@ package me.grate.casemanager.command;
 
 import me.grate.casemanager.CaseManager;
 import me.grate.casemanager.casefile.Case;
+import me.grate.casemanager.casefile.CaseNote;
 import me.grate.casemanager.casefile.CaseService;
 import me.grate.casemanager.casefile.CaseTimelineEntry;
 import org.bukkit.Bukkit;
@@ -49,6 +50,8 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             case "list" -> handleList(sender, args);
 
             case "timeline" -> handleTimeline(sender, args);
+
+            case "note" -> handleNote(sender, args);
 
             default -> sendHelp(sender);
         }
@@ -422,8 +425,218 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
                     return null;
                 });
-                        }
-        private void sendCaseCreated(
+    }
+
+    private void handleNote(
+            CommandSender sender,
+            String[] args
+    ) {
+
+        if (!sender.hasPermission("casemanager.note")) {
+            sendNoPermission(sender);
+            return;
+        }
+
+        if (!(sender instanceof Player author)) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Only players can add case notes."
+            );
+            return;
+        }
+
+        if (args.length < 3) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Usage: /case note <id> <message>"
+            );
+            return;
+        }
+
+        long caseId;
+
+        try {
+            caseId = Long.parseLong(args[1]);
+        } catch (NumberFormatException exception) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Case ID must be a number."
+            );
+            return;
+        }
+
+        if (caseId <= 0) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Invalid case ID."
+            );
+            return;
+        }
+
+        String content = String.join(
+                " ",
+                Arrays.copyOfRange(args, 2, args.length)
+        );
+
+        if (content.isBlank()) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "The note cannot be empty."
+            );
+            return;
+        }
+
+        if (content.length() > 2000) {
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "The note cannot exceed 2000 characters."
+            );
+            return;
+        }
+
+        sender.sendMessage(
+                ChatColor.GRAY +
+                        "Checking case #" +
+                        caseId +
+                        "..."
+        );
+
+        plugin.getCaseService()
+                .getCase(caseId)
+                .thenAccept(caseFile -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> {
+
+                                if (caseFile == null) {
+
+                                    sender.sendMessage(
+                                            ChatColor.RED +
+                                                    "Case #" +
+                                                    caseId +
+                                                    " does not exist."
+                                    );
+
+                                    return;
+                                }
+
+                                sender.sendMessage(
+                                        ChatColor.GRAY +
+                                                "Adding note..."
+                                );
+
+                                plugin.getCaseNoteService()
+                                        .addNote(
+                                                caseId,
+                                                author.getUniqueId(),
+                                                author.getName(),
+                                                content
+                                        )
+                                        .thenAccept(note -> {
+
+                                            Bukkit.getScheduler().runTask(
+                                                    plugin,
+                                                    () -> sendNoteCreated(
+                                                            sender,
+                                                            note
+                                                    )
+                                            );
+
+                                        })
+                                        .exceptionally(exception -> {
+
+                                            Bukkit.getScheduler().runTask(
+                                                    plugin,
+                                                    () -> sender.sendMessage(
+                                                            ChatColor.RED +
+                                                                    "Failed to add the case note."
+                                                    )
+                                            );
+
+                                            plugin.getLogger().severe(
+                                                    "Failed to add note to case #" +
+                                                            caseId
+                                            );
+
+                                            exception.printStackTrace();
+
+                                            return null;
+                                        });
+                            }
+                    );
+
+                })
+                .exceptionally(exception -> {
+
+                    Bukkit.getScheduler().runTask(
+                            plugin,
+                            () -> sender.sendMessage(
+                                    ChatColor.RED +
+                                            "Failed to load case #" +
+                                            caseId +
+                                            "."
+                            )
+                    );
+
+                    plugin.getLogger().severe(
+                            "Failed to check case #" +
+                                    caseId
+                    );
+
+                    exception.printStackTrace();
+
+                    return null;
+                });
+                }
+        private void sendNoteCreated(
+            CommandSender sender,
+            CaseNote note
+    ) {
+
+        sender.sendMessage("");
+
+        sender.sendMessage(
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
+        );
+
+        sender.sendMessage(
+                ChatColor.DARK_AQUA +
+                        "CaseManager"
+        );
+
+        sender.sendMessage(
+                ChatColor.GREEN +
+                        "✓ " +
+                        ChatColor.GRAY +
+                        "Note " +
+                        ChatColor.WHITE +
+                        "#" +
+                        note.getId() +
+                        ChatColor.GRAY +
+                        " added to case " +
+                        ChatColor.WHITE +
+                        "#" +
+                        note.getCaseId()
+        );
+
+        sender.sendMessage(
+                ChatColor.GRAY +
+                        "Note: " +
+                        ChatColor.WHITE +
+                        note.getContent()
+        );
+
+        sender.sendMessage(
+                ChatColor.DARK_GRAY +
+                        "━━━━━━━━━━━━━━━━━━━━"
+        );
+
+        sender.sendMessage("");
+    }
+
+    private void sendCaseCreated(
             CommandSender sender,
             Case caseFile
     ) {
@@ -729,6 +942,11 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                         "/case timeline <id>"
         );
 
+        sender.sendMessage(
+                ChatColor.GRAY +
+                        "/case note <id> <message>"
+        );
+
         sender.sendMessage("");
     }
 
@@ -772,6 +990,12 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                     "casemanager.list"
             )) {
                 suggestions.add("list");
+            }
+
+            if (sender.hasPermission(
+                    "casemanager.note"
+            )) {
+                suggestions.add("note");
             }
 
             return filter(
@@ -839,4 +1063,4 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                 .sorted()
                 .toList();
     }
-            }
+                }
