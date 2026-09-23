@@ -25,21 +25,6 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
     private final CaseManager plugin;
 
-    /*
-     * Default investigation limits.
-     *
-     * These will later be moved into config.yml so server
-     * owners can customize them.
-     */
-    private static final int COREPROTECT_TIME_SECONDS =
-            86400;
-
-    private static final int COREPROTECT_LIMIT =
-            50;
-
-    private static final int PUNISHMENT_LIMIT =
-            20;
-
     private final List<String> evidenceTypes = Arrays.asList(
             "SCREENSHOT",
             "VIDEO",
@@ -340,7 +325,15 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        int limit = 10;
+        int configuredLimit = Math.max(
+                1,
+                plugin.getConfig().getInt(
+                        "cases.list-limit",
+                        50
+                )
+        );
+
+        int limit = Math.min(10, configuredLimit);
 
         if (args.length >= 2) {
 
@@ -362,11 +355,13 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             }
         }
 
-        if (limit < 1 || limit > 50) {
+        if (limit < 1 || limit > configuredLimit) {
 
             sender.sendMessage(
                     ChatColor.RED +
-                            "Limit must be between 1 and 50."
+                            "Limit must be between 1 and " +
+                            configuredLimit +
+                            "."
             );
 
             return;
@@ -773,6 +768,26 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
+        int maxEvidenceContentLength = Math.max(
+                1,
+                plugin.getConfig().getInt(
+                        "evidence.max-content-length",
+                        10000
+                )
+        );
+
+        if (content.length() > maxEvidenceContentLength) {
+
+            sender.sendMessage(
+                    ChatColor.RED +
+                            "Evidence content is too long. Maximum length: " +
+                            maxEvidenceContentLength +
+                            " characters."
+            );
+
+            return;
+        }
+
         plugin.getCaseService()
                 .getCase(caseId)
                 .thenAccept(caseFile -> {
@@ -904,15 +919,42 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
 
                     plugin.getCaseEvidenceService()
                             .getEvidence(caseId)
-                            .thenAccept(evidence ->
-                                    Bukkit.getScheduler().runTask(
-                                            plugin,
-                                            () -> sendEvidenceList(
-                                                    sender,
-                                                    evidence
-                                            )
-                                    )
-                            )
+                            .thenAccept(evidence -> {
+
+                                int configuredLimit = Math.max(
+                                        1,
+                                        plugin.getConfig().getInt(
+                                                "evidence.list-limit",
+                                                100
+                                        )
+                                );
+
+                                List<CaseEvidence> visibleEvidence =
+                                        evidence;
+
+                                if (evidence.size() > configuredLimit) {
+
+                                    visibleEvidence =
+                                            new ArrayList<>(
+                                                    evidence.subList(
+                                                            0,
+                                                            configuredLimit
+                                                    )
+                                            );
+                                }
+
+                                List<CaseEvidence> finalEvidence =
+                                        visibleEvidence;
+
+                                Bukkit.getScheduler().runTask(
+                                        plugin,
+                                        () -> sendEvidenceList(
+                                                sender,
+                                                caseFile,
+                                                finalEvidence
+                                        )
+                                );
+                            })
                             .exceptionally(exception -> {
 
                                 Bukkit.getScheduler().runTask(
@@ -1143,8 +1185,14 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                         caseFile.getId(),
                         caseFile.getTargetUuid(),
                         caseFile.getTargetName(),
-                        COREPROTECT_TIME_SECONDS,
-                        COREPROTECT_LIMIT,
+                        plugin.getConfig().getInt(
+                                "integrations.coreprotect.evidence.time-seconds",
+                                86400
+                        ),
+                        plugin.getConfig().getInt(
+                                "integrations.coreprotect.evidence.limit",
+                                50
+                        ),
                         player.getUniqueId(),
                         player.getName()
                 )
@@ -1268,7 +1316,10 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                         caseFile.getId(),
                         caseFile.getTargetUuid(),
                         caseFile.getTargetName(),
-                        PUNISHMENT_LIMIT,
+                        plugin.getConfig().getInt(
+                                "integrations.litebans.evidence-limit",
+                                20
+                        ),
                         player.getUniqueId(),
                         player.getName()
                 )
@@ -1356,9 +1407,18 @@ public final class CaseCommand implements CommandExecutor, TabCompleter {
                         caseFile.getId(),
                         caseFile.getTargetUuid(),
                         caseFile.getTargetName(),
-                        COREPROTECT_TIME_SECONDS,
-                        COREPROTECT_LIMIT,
-                        PUNISHMENT_LIMIT,
+                        plugin.getConfig().getInt(
+                                "integrations.coreprotect.evidence.time-seconds",
+                                86400
+                        ),
+                        plugin.getConfig().getInt(
+                                "integrations.coreprotect.evidence.limit",
+                                50
+                        ),
+                        plugin.getConfig().getInt(
+                                "integrations.litebans.evidence-limit",
+                                20
+                        ),
                         player.getUniqueId(),
                         player.getName()
                 )
