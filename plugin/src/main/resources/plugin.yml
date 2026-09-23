@@ -8,7 +8,6 @@ softdepend:
   - Vulcan
   - LiteBans
 
-
 description: Advanced moderation case management system.
 author: Grate
 
