@@ -10,6 +10,7 @@ import java.sql.SQLException;
 public final class DatabaseManager {
 
     private final CaseManager plugin;
+
     private HikariDataSource dataSource;
 
     public DatabaseManager(CaseManager plugin) {
@@ -17,56 +18,229 @@ public final class DatabaseManager {
     }
 
     public void connect() {
-        String host = plugin.getConfig().getString("database.host");
-        int port = plugin.getConfig().getInt("database.port");
-        String database = plugin.getConfig().getString("database.name");
-        String username = plugin.getConfig().getString("database.username");
-        String password = plugin.getConfig().getString("database.password");
 
-        int poolSize = plugin.getConfig().getInt("database.pool-size", 10);
-        boolean ssl = plugin.getConfig().getBoolean("database.ssl", false);
+        if (isConnected()) {
+            plugin.getLogger().warning(
+                    "Database connection pool is already initialized."
+            );
+            return;
+        }
 
-        HikariConfig config = new HikariConfig();
+        String host =
+                plugin.getConfig().getString(
+                        "database.host",
+                        "localhost"
+                );
 
-        config.setJdbcUrl(
-                "jdbc:mysql://" + host + ":" + port + "/" + database
-                        + "?useSSL=" + ssl
-                        + "&serverTimezone=UTC"
+        int port =
+                plugin.getConfig().getInt(
+                        "database.port",
+                        3306
+                );
+
+        String database =
+                plugin.getConfig().getString(
+                        "database.name",
+                        "casemanager"
+                );
+
+        String username =
+                plugin.getConfig().getString(
+                        "database.username",
+                        "root"
+                );
+
+        String password =
+                plugin.getConfig().getString(
+                        "database.password",
+                        ""
+                );
+
+        int poolSize =
+                Math.max(
+                        2,
+                        plugin.getConfig().getInt(
+                                "database.pool-size",
+                                10
+                        )
+                );
+
+        boolean ssl =
+                plugin.getConfig().getBoolean(
+                        "database.ssl",
+                        false
+                );
+
+        if (host == null || host.isBlank()) {
+            throw new IllegalStateException(
+                    "Database host cannot be empty."
+            );
+        }
+
+        if (database == null || database.isBlank()) {
+            throw new IllegalStateException(
+                    "Database name cannot be empty."
+            );
+        }
+
+        if (username == null || username.isBlank()) {
+            throw new IllegalStateException(
+                    "Database username cannot be empty."
+            );
+        }
+
+        if (password == null) {
+            password = "";
+        }
+
+        HikariConfig hikariConfig =
+                new HikariConfig();
+
+        String jdbcUrl =
+                "jdbc:mysql://" +
+                        host +
+                        ":" +
+                        port +
+                        "/" +
+                        database +
+                        "?useSSL=" +
+                        ssl +
+                        "&serverTimezone=UTC" +
+                        "&characterEncoding=utf8" +
+                        "&useUnicode=true" +
+                        "&autoReconnect=true";
+
+        hikariConfig.setJdbcUrl(
+                jdbcUrl
         );
 
-        config.setUsername(username);
-        config.setPassword(password);
+        hikariConfig.setUsername(
+                username
+        );
 
-        config.setMaximumPoolSize(poolSize);
-        config.setMinimumIdle(2);
+        hikariConfig.setPassword(
+                password
+        );
 
-        config.setPoolName("CaseManager-MySQL");
+        hikariConfig.setMaximumPoolSize(
+                poolSize
+        );
 
-        config.setConnectionTimeout(10000);
-        config.setIdleTimeout(600000);
-        config.setMaxLifetime(1800000);
+        hikariConfig.setMinimumIdle(
+                Math.min(2, poolSize)
+        );
 
-        dataSource = new HikariDataSource(config);
+        hikariConfig.setPoolName(
+                "CaseManager-MySQL"
+        );
 
-        plugin.getLogger().info("MySQL connection pool initialized.");
+        hikariConfig.setConnectionTimeout(
+                10_000
+        );
+
+        hikariConfig.setValidationTimeout(
+                5_000
+        );
+
+        hikariConfig.setIdleTimeout(
+                600_000
+        );
+
+        hikariConfig.setMaxLifetime(
+                1_800_000
+        );
+
+        hikariConfig.setLeakDetectionThreshold(
+                0
+        );
+
+        hikariConfig.setConnectionTestQuery(
+                "SELECT 1"
+        );
+
+        HikariDataSource newDataSource = null;
+
+        try {
+
+            newDataSource =
+                    new HikariDataSource(
+                            hikariConfig
+                    );
+
+            try (Connection connection =
+                         newDataSource.getConnection()) {
+
+                if (!connection.isValid(5)) {
+
+                    throw new SQLException(
+                            "Database connection validation failed."
+                    );
+                }
+            }
+
+            dataSource =
+                    newDataSource;
+
+            plugin.getLogger().info(
+                    "MySQL connection pool initialized successfully."
+            );
+
+            plugin.getLogger().info(
+                    "Database: " +
+                            database
+            );
+
+        } catch (Exception exception) {
+
+            if (newDataSource != null &&
+                    !newDataSource.isClosed()) {
+
+                newDataSource.close();
+            }
+
+            dataSource = null;
+
+            throw new IllegalStateException(
+                    "Failed to initialize MySQL connection pool.",
+                    exception
+            );
+        }
     }
 
-    public Connection getConnection() throws SQLException {
-        if (dataSource == null || dataSource.isClosed()) {
-            throw new SQLException("Database connection pool is not initialized.");
+    public Connection getConnection()
+            throws SQLException {
+
+        if (!isConnected()) {
+
+            throw new SQLException(
+                    "Database connection pool is not initialized."
+            );
         }
 
         return dataSource.getConnection();
     }
 
     public void close() {
-        if (dataSource != null && !dataSource.isClosed()) {
-            dataSource.close();
-            plugin.getLogger().info("MySQL connection pool closed.");
+
+        if (dataSource == null) {
+            return;
         }
+
+        if (!dataSource.isClosed()) {
+
+            dataSource.close();
+
+            plugin.getLogger().info(
+                    "MySQL connection pool closed."
+            );
+        }
+
+        dataSource = null;
     }
 
     public boolean isConnected() {
-        return dataSource != null && !dataSource.isClosed();
+
+        return dataSource != null &&
+                !dataSource.isClosed();
     }
 }
