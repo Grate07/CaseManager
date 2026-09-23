@@ -3,6 +3,7 @@ package me.grate.casemanager.integration;
 import me.grate.casemanager.CaseManager;
 import net.coreprotect.CoreProtect;
 import net.coreprotect.CoreProtectAPI;
+import net.coreprotect.api.CoreProtectAction;
 import org.bukkit.Location;
 import org.bukkit.plugin.Plugin;
 
@@ -13,11 +14,26 @@ import java.util.concurrent.CompletableFuture;
 
 public final class CoreProtectIntegration {
 
+    private static final int MIN_API_VERSION = 13;
+
+    private static final int MAX_LOOKUP_LIMIT = 100;
+
+    private static final List<Integer> INVESTIGATION_ACTIONS =
+            List.of(
+                    CoreProtectAction.BLOCK_BREAK.id(),
+                    CoreProtectAction.BLOCK_PLACE.id(),
+                    CoreProtectAction.INTERACTION.id(),
+                    CoreProtectAction.ENTITY_KILL.id(),
+                    CoreProtectAction.ENTITY_SPAWN.id()
+            );
+
     private final CaseManager plugin;
 
     private CoreProtectAPI api;
 
-    public CoreProtectIntegration(CaseManager plugin) {
+    public CoreProtectIntegration(
+            CaseManager plugin
+    ) {
         this.plugin = plugin;
     }
 
@@ -69,12 +85,17 @@ public final class CoreProtectIntegration {
             return false;
         }
 
-        if (coreProtectApi.APIVersion() < 13) {
+        int apiVersion =
+                coreProtectApi.APIVersion();
+
+        if (apiVersion < MIN_API_VERSION) {
 
             plugin.getLogger().warning(
                     "CoreProtect API version " +
-                            coreProtectApi.APIVersion() +
-                            " is too old. API v13 or newer is required."
+                            apiVersion +
+                            " is too old. API v" +
+                            MIN_API_VERSION +
+                            " or newer is required."
             );
 
             return false;
@@ -82,10 +103,26 @@ public final class CoreProtectIntegration {
 
         api = coreProtectApi;
 
+        try {
+
+            api.testAPI();
+
+        } catch (Exception exception) {
+
+            plugin.getLogger().warning(
+                    "CoreProtect API test failed: " +
+                            getRootMessage(exception)
+            );
+
+            api = null;
+
+            return false;
+        }
+
         plugin.getLogger().info(
                 "CoreProtect API v" +
-                        api.APIVersion() +
-                        " connected."
+                        apiVersion +
+                        " connected successfully."
         );
 
         return true;
@@ -95,7 +132,7 @@ public final class CoreProtectIntegration {
 
         return api != null &&
                 api.isEnabled() &&
-                api.APIVersion() >= 13;
+                api.APIVersion() >= MIN_API_VERSION;
     }
 
     public CoreProtectAPI getApi() {
@@ -118,20 +155,14 @@ public final class CoreProtectIntegration {
             );
         }
 
-        int safeLimit =
-                Math.max(
-                        1,
-                        Math.min(
-                                limit,
-                                100
-                        )
-                );
-
         int safeTime =
                 Math.max(
                         1,
                         timeSeconds
                 );
+
+        int safeLimit =
+                normalizeLimit(limit);
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -142,41 +173,14 @@ public final class CoreProtectIntegration {
                             null,
                             null,
                             null,
-                            null,
+                            INVESTIGATION_ACTIONS,
                             0,
                             null,
                             0,
                             safeLimit
                     );
 
-            if (rows == null ||
-                    rows.isEmpty()) {
-
-                return Collections.emptyList();
-            }
-
-            List<CoreProtectRecord> records =
-                    new ArrayList<>();
-
-            for (String[] row : rows) {
-
-                if (row == null) {
-                    continue;
-                }
-
-                CoreProtectAPI.ParseResult result =
-                        api.parseResult(row);
-
-                if (result == null) {
-                    continue;
-                }
-
-                records.add(
-                        mapResult(result)
-                );
-            }
-
-            return records;
+            return parseRows(rows);
         });
     }
 
@@ -212,13 +216,7 @@ public final class CoreProtectIntegration {
                 );
 
         int safeLimit =
-                Math.max(
-                        1,
-                        Math.min(
-                                limit,
-                                100
-                        )
-                );
+                normalizeLimit(limit);
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -229,43 +227,17 @@ public final class CoreProtectIntegration {
                             null,
                             null,
                             null,
-                            null,
+                            INVESTIGATION_ACTIONS,
                             safeRadius,
                             searchLocation,
                             0,
                             safeLimit
                     );
 
-            if (rows == null ||
-                    rows.isEmpty()) {
-
-                return Collections.emptyList();
-            }
-
-            List<CoreProtectRecord> records =
-                    new ArrayList<>();
-
-            for (String[] row : rows) {
-
-                if (row == null) {
-                    continue;
-                }
-
-                CoreProtectAPI.ParseResult result =
-                        api.parseResult(row);
-
-                if (result == null) {
-                    continue;
-                }
-
-                records.add(
-                        mapResult(result)
-                );
-            }
-
-            return records;
+            return parseRows(rows);
         });
     }
+
     public CompletableFuture<List<CoreProtectRecord>> lookupPlayerAtLocation(
             String playerName,
             Location location,
@@ -301,13 +273,7 @@ public final class CoreProtectIntegration {
                 );
 
         int safeLimit =
-                Math.max(
-                        1,
-                        Math.min(
-                                limit,
-                                100
-                        )
-                );
+                normalizeLimit(limit);
 
         return CompletableFuture.supplyAsync(() -> {
 
@@ -318,27 +284,37 @@ public final class CoreProtectIntegration {
                             null,
                             null,
                             null,
-                            null,
+                            INVESTIGATION_ACTIONS,
                             safeRadius,
                             searchLocation,
                             0,
                             safeLimit
                     );
 
-            if (rows == null ||
-                    rows.isEmpty()) {
+            return parseRows(rows);
+        });
+    }
 
-                return Collections.emptyList();
+    private List<CoreProtectRecord> parseRows(
+            List<String[]> rows
+    ) {
+
+        if (rows == null ||
+                rows.isEmpty()) {
+
+            return Collections.emptyList();
+        }
+
+        List<CoreProtectRecord> records =
+                new ArrayList<>();
+
+        for (String[] row : rows) {
+
+            if (row == null) {
+                continue;
             }
 
-            List<CoreProtectRecord> records =
-                    new ArrayList<>();
-
-            for (String[] row : rows) {
-
-                if (row == null) {
-                    continue;
-                }
+            try {
 
                 CoreProtectAPI.ParseResult result =
                         api.parseResult(row);
@@ -350,10 +326,17 @@ public final class CoreProtectIntegration {
                 records.add(
                         mapResult(result)
                 );
-            }
 
-            return records;
-        });
+            } catch (Exception exception) {
+
+                plugin.getLogger().warning(
+                        "Failed to parse a CoreProtect lookup result: " +
+                                getRootMessage(exception)
+                );
+            }
+        }
+
+        return records;
     }
 
     private CoreProtectRecord mapResult(
@@ -450,26 +433,38 @@ public final class CoreProtectIntegration {
                 records
         ) {
 
+            if (record == null) {
+                continue;
+            }
+
             builder.append(
                     "\n\n#"
-            ).append(index);
+            ).append(
+                    index
+            );
 
             builder.append(
                     "\nPlayer: "
             ).append(
-                    record.getPlayer()
+                    safeText(record.getPlayer())
             );
 
             builder.append(
                     "\nAction: "
             ).append(
-                    record.getAction()
+                    safeText(record.getAction())
+            );
+
+            builder.append(
+                    "\nAction ID: "
+            ).append(
+                    record.getActionId()
             );
 
             builder.append(
                     "\nLocation: "
             ).append(
-                    record.getWorld()
+                    safeText(record.getWorld())
             ).append(
                     " "
             ).append(
@@ -509,7 +504,7 @@ public final class CoreProtectIntegration {
             );
 
             builder.append(
-                    "\nRolled back: "
+                    "\nRolled Back: "
             ).append(
                     record.isRolledBack()
             );
@@ -519,6 +514,63 @@ public final class CoreProtectIntegration {
 
         return builder.toString();
     }
+
+    private int normalizeLimit(
+            int limit
+    ) {
+
+        return Math.max(
+                1,
+                Math.min(
+                        limit,
+                        MAX_LOOKUP_LIMIT
+                )
+        );
+    }
+
+    private String safeText(
+            String value
+    ) {
+
+        if (value == null ||
+                value.isBlank()) {
+
+            return "Unknown";
+        }
+
+        return value;
+    }
+
+    private String getRootMessage(
+            Throwable throwable
+    ) {
+
+        if (throwable == null) {
+            return "Unknown error";
+        }
+
+        Throwable current =
+                throwable;
+
+        while (current.getCause() != null) {
+            current =
+                    current.getCause();
+        }
+
+        String message =
+                current.getMessage();
+
+        if (message == null ||
+                message.isBlank()) {
+
+            return current
+                    .getClass()
+                    .getSimpleName();
+        }
+
+        return message;
+    }
+
     public static final class CoreProtectRecord {
 
         private final String player;
@@ -653,13 +705,13 @@ public final class CoreProtectIntegration {
             builder.append(
                     "\nPlayer: "
             ).append(
-                    player
+                    safeValue(player)
             );
 
             builder.append(
                     "\nAction: "
             ).append(
-                    action
+                    safeValue(action)
             );
 
             builder.append(
@@ -671,7 +723,7 @@ public final class CoreProtectIntegration {
             builder.append(
                     "\nWorld: "
             ).append(
-                    world
+                    safeValue(world)
             );
 
             builder.append(
@@ -719,6 +771,19 @@ public final class CoreProtectIntegration {
             );
 
             return builder.toString();
+        }
+
+        private static String safeValue(
+                String value
+        ) {
+
+            if (value == null ||
+                    value.isBlank()) {
+
+                return "Unknown";
+            }
+
+            return value;
         }
     }
 }
