@@ -121,9 +121,6 @@ public final class CaseService {
                                     now
                             );
 
-                    /*
-                     * Record the first audit event.
-                     */
                     timelineService.addEntry(
                             caseId,
                             creatorUuid,
@@ -245,6 +242,7 @@ public final class CaseService {
                 ) {
 
                     while (result.next()) {
+
                         cases.add(
                                 mapCase(result)
                         );
@@ -263,6 +261,127 @@ public final class CaseService {
         });
     }
 
+    public CompletableFuture<Case> updateStatus(
+            long caseId,
+            CaseStatus newStatus,
+            UUID actorUuid,
+            String actorName
+    ) {
+
+        return CompletableFuture.supplyAsync(() -> {
+
+            String selectSql = """
+                    SELECT
+                        id,
+                        target_uuid,
+                        target_name,
+                        creator_uuid,
+                        creator_name,
+                        reason,
+                        status,
+                        created_at,
+                        updated_at
+                    FROM cases
+                    WHERE id = ?
+                    """;
+
+            String updateSql = """
+                    UPDATE cases
+                    SET status = ?
+                    WHERE id = ?
+                    """;
+
+            try (
+                    Connection connection =
+                            database.getConnection();
+
+                    PreparedStatement selectStatement =
+                            connection.prepareStatement(
+                                    selectSql
+                            )
+            ) {
+
+                selectStatement.setLong(
+                        1,
+                        caseId
+                );
+
+                Case caseFile;
+
+                try (
+                        ResultSet result =
+                                selectStatement.executeQuery()
+                ) {
+
+                    if (!result.next()) {
+                        return null;
+                    }
+
+                    caseFile =
+                            mapCase(result);
+                }
+
+                CaseStatus oldStatus =
+                        caseFile.getStatus();
+
+                if (oldStatus == newStatus) {
+                    return caseFile;
+                }
+
+                try (
+                        PreparedStatement updateStatement =
+                                connection.prepareStatement(
+                                        updateSql
+                                )
+                ) {
+
+                    updateStatement.setString(
+                            1,
+                            newStatus.name()
+                    );
+
+                    updateStatement.setLong(
+                            2,
+                            caseId
+                    );
+
+                    int affected =
+                            updateStatement.executeUpdate();
+
+                    if (affected == 0) {
+                        throw new SQLException(
+                                "Case status could not be updated."
+                        );
+                    }
+                }
+
+                caseFile.setStatus(
+                        newStatus
+                );
+
+                timelineService.addEntry(
+                        caseId,
+                        actorUuid,
+                        actorName,
+                        "STATUS_CHANGED",
+                        "Status changed from " +
+                                oldStatus.name() +
+                                " to " +
+                                newStatus.name() +
+                                "."
+                ).join();
+
+                return caseFile;
+
+            } catch (SQLException exception) {
+
+                throw new RuntimeException(
+                        "Failed to update case status.",
+                        exception
+                );
+            }
+        });
+    }
     private Case mapCase(
             ResultSet result
     ) throws SQLException {
