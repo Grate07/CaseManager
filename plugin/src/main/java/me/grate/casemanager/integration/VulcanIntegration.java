@@ -3,18 +3,13 @@ package me.grate.casemanager.integration;
 import me.grate.casemanager.CaseManager;
 import org.bukkit.plugin.Plugin;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.Collections;
 import java.util.UUID;
 
 public final class VulcanIntegration {
 
     private final CaseManager plugin;
 
-    private Object vulcanApi;
-
-    private Method apiMethod;
+    private Plugin vulcanPlugin;
 
     private boolean available;
 
@@ -26,9 +21,7 @@ public final class VulcanIntegration {
 
     public void initialize() {
 
-        available = false;
-        vulcanApi = null;
-        apiMethod = null;
+        reset();
 
         Plugin vulcan =
                 plugin.getServer()
@@ -53,128 +46,83 @@ public final class VulcanIntegration {
             return;
         }
 
-        try {
+        vulcanPlugin =
+                vulcan;
 
-            Class<?> vulcanClass =
-                    Class.forName(
-                            "me.frep.vulcan.api.VulcanAPI"
-                    );
+        /*
+         * Vulcan's official documentation requires
+         * enable-api: true for plugins using its Developer API.
+         *
+         * The actual Developer API classes are distributed
+         * separately by Vulcan and are not publicly documented
+         * on the official wiki.
+         *
+         * Therefore we do not guess API methods here.
+         */
+        available =
+                isVulcanApiEnabled();
 
-            apiMethod =
-                    findApiMethod(
-                            vulcanClass
-                    );
-
-            if (apiMethod == null) {
-
-                plugin.getLogger().warning(
-                        "Vulcan API method could not be found."
-                );
-
-                return;
-            }
-
-            vulcanApi =
-                    apiMethod.invoke(
-                            null
-                    );
-
-            if (vulcanApi == null) {
-
-                plugin.getLogger().warning(
-                        "Vulcan returned a null API."
-                );
-
-                reset();
-
-                return;
-            }
-
-            available = true;
+        if (available) {
 
             plugin.getLogger().info(
-                    "Vulcan integration enabled."
+                    "Vulcan detected and its Developer API " +
+                            "is enabled."
             );
 
-        } catch (ClassNotFoundException exception) {
+        } else {
 
             plugin.getLogger().warning(
-                    "Vulcan API is not available. " +
-                            "Make sure Vulcan's API is enabled."
+                    "Vulcan is installed, but its Developer API " +
+                            "is not enabled. Set enable-api: true " +
+                            "in Vulcan's configuration."
             );
-
-            reset();
-
-        } catch (
-                IllegalAccessException |
-                InvocationTargetException exception
-        ) {
-
-            plugin.getLogger().warning(
-                    "Failed to initialize Vulcan integration: " +
-                            getRootMessage(exception)
-            );
-
-            reset();
-
-        } catch (Exception exception) {
-
-            plugin.getLogger().warning(
-                    "Unexpected Vulcan integration error: " +
-                            exception.getMessage()
-            );
-
-            reset();
         }
     }
 
     public boolean isAvailable() {
 
         return available &&
-                vulcanApi != null;
+                vulcanPlugin != null &&
+                vulcanPlugin.isEnabled();
+    }
+
+    public Plugin getPlugin() {
+
+        return vulcanPlugin;
+    }
+
+    /*
+     * Vulcan's official API documentation states that
+     * enable-api: true is required.
+     *
+     * We intentionally do not attempt to inspect or modify
+     * Vulcan's internal configuration through reflection.
+     *
+     * If the API library is added to the build later, this
+     * method can be replaced with the official API initialization.
+     */
+    private boolean isVulcanApiEnabled() {
+
+        /*
+         * We cannot reliably determine the value of
+         * enable-api without using Vulcan's private
+         * implementation or its separately distributed
+         * Developer API.
+         *
+         * Return false until the official API dependency
+         * is installed and wired into CaseManager.
+         */
+        return false;
     }
 
     public Object getApi() {
 
-        return vulcanApi;
-    }
-
-    private Method findApiMethod(
-            Class<?> vulcanClass
-    ) {
-
-        for (Method method :
-                vulcanClass.getMethods()) {
-
-            if (!method.getName()
-                    .equals("getInstance")) {
-
-                continue;
-            }
-
-            if (method.getParameterCount() != 0) {
-                continue;
-            }
-
-            return method;
-        }
-
-        for (Method method :
-                vulcanClass.getMethods()) {
-
-            if (!method.getName()
-                    .equals("getAPI")) {
-
-                continue;
-            }
-
-            if (method.getParameterCount() != 0) {
-                continue;
-            }
-
-            return method;
-        }
-
+        /*
+         * No undocumented API object is exposed.
+         *
+         * This deliberately returns null until the official
+         * Vulcan Developer API is integrated.
+         */
         return null;
     }
 
@@ -182,206 +130,21 @@ public final class VulcanIntegration {
             UUID playerUuid
     ) {
 
-        if (!isAvailable() ||
-                playerUuid == null) {
-
-            return 0;
-        }
-
         /*
-         * Vulcan API versions can expose violation information
-         * through different methods. We therefore inspect the
-         * available API methods instead of directly depending
-         * on one implementation.
+         * Not available until the official Vulcan Developer
+         * API is installed and its documented methods are wired.
          */
-
-        try {
-
-            Method method =
-                    findViolationMethod();
-
-            if (method == null) {
-                return 0;
-            }
-
-            Object result;
-
-            Class<?>[] parameters =
-                    method.getParameterTypes();
-
-            if (parameters.length == 1 &&
-                    parameters[0] == UUID.class) {
-
-                result =
-                        method.invoke(
-                                vulcanApi,
-                                playerUuid
-                        );
-
-            } else {
-
-                return 0;
-            }
-
-            if (result instanceof Number number) {
-
-                return number.intValue();
-            }
-
-            return 0;
-
-        } catch (
-                IllegalAccessException |
-                InvocationTargetException exception
-        ) {
-
-            plugin.getLogger().warning(
-                    "Failed to retrieve Vulcan violation level: " +
-                            getRootMessage(exception)
-            );
-
-            return 0;
-
-        } catch (Exception exception) {
-
-            plugin.getLogger().warning(
-                    "Unexpected Vulcan violation lookup error: " +
-                            exception.getMessage()
-            );
-
-            return 0;
-        }
+        return 0;
     }
 
-    private Method findViolationMethod() {
-
-        if (vulcanApi == null) {
-            return null;
-        }
-
-        for (Method method :
-                vulcanApi.getClass()
-                        .getMethods()) {
-
-            String name =
-                    method.getName()
-                            .toLowerCase();
-
-            if (!name.contains("violation") &&
-                    !name.contains("vl")) {
-
-                continue;
-            }
-
-            if (method.getParameterCount() != 1) {
-                continue;
-            }
-
-            if (method.getParameterTypes()[0]
-                    != UUID.class) {
-
-                continue;
-            }
-
-            if (!Number.class.isAssignableFrom(
-                    method.getReturnType()
-            ) &&
-                    method.getReturnType() != int.class &&
-                    method.getReturnType() != long.class) {
-
-                continue;
-            }
-
-            return method;
-        }
-
-        return null;
-    }
     public String getPlayerProfile(
             UUID playerUuid
     ) {
 
-        if (!isAvailable() ||
-                playerUuid == null) {
-
-            return null;
-        }
-
-        try {
-
-            Method profileMethod =
-                    findProfileMethod();
-
-            if (profileMethod == null) {
-                return null;
-            }
-
-            Object result =
-                    profileMethod.invoke(
-                            vulcanApi,
-                            playerUuid
-                    );
-
-            if (result == null) {
-                return null;
-            }
-
-            return result.toString();
-
-        } catch (
-                IllegalAccessException |
-                InvocationTargetException exception
-        ) {
-
-            plugin.getLogger().warning(
-                    "Failed to retrieve Vulcan profile: " +
-                            getRootMessage(exception)
-            );
-
-            return null;
-
-        } catch (Exception exception) {
-
-            plugin.getLogger().warning(
-                    "Unexpected Vulcan profile error: " +
-                            exception.getMessage()
-            );
-
-            return null;
-        }
-    }
-
-    private Method findProfileMethod() {
-
-        if (vulcanApi == null) {
-            return null;
-        }
-
-        for (Method method :
-                vulcanApi.getClass()
-                        .getMethods()) {
-
-            String name =
-                    method.getName()
-                            .toLowerCase();
-
-            if (!name.contains("profile")) {
-                continue;
-            }
-
-            if (method.getParameterCount() != 1) {
-                continue;
-            }
-
-            if (method.getParameterTypes()[0]
-                    != UUID.class) {
-
-                continue;
-            }
-
-            return method;
-        }
-
+        /*
+         * Not available until the official Vulcan Developer
+         * API is installed and its documented methods are wired.
+         */
         return null;
     }
 
@@ -408,37 +171,24 @@ public final class VulcanIntegration {
 
             builder.append(
                     "\nPlayer: "
-            ).append(playerName);
+            ).append(
+                    playerName
+            );
         }
 
         if (playerUuid != null) {
 
             builder.append(
                     "\nUUID: "
-            ).append(playerUuid);
+            ).append(
+                    playerUuid
+            );
         }
-
-        int violationLevel =
-                getViolationLevel(
-                        playerUuid
-                );
 
         builder.append(
-                "\nViolation Level: "
-        ).append(violationLevel);
-
-        String profile =
-                getPlayerProfile(
-                        playerUuid
-                );
-
-        if (profile != null &&
-                !profile.isBlank()) {
-
-            builder.append(
-                    "\nProfile: "
-            ).append(profile);
-        }
+                "\nDeveloper API data collection is " +
+                        "not yet configured."
+        );
 
         return builder.toString();
     }
@@ -447,51 +197,16 @@ public final class VulcanIntegration {
             UUID playerUuid
     ) {
 
-        if (!isAvailable() ||
-                playerUuid == null) {
-
-            return false;
-        }
-
-        return getViolationLevel(
-                playerUuid
-        ) > 0;
-    }
-
-    private String getRootMessage(
-            Throwable throwable
-    ) {
-
-        Throwable current =
-                throwable;
-
-        while (current.getCause() != null) {
-
-            current =
-                    current.getCause();
-        }
-
-        String message =
-                current.getMessage();
-
-        return message == null
-                ? current.getClass()
-                        .getSimpleName()
-                : message;
+        return false;
     }
 
     private void reset() {
 
         available = false;
 
-        vulcanApi = null;
-
-        apiMethod = null;
+        vulcanPlugin = null;
     }
-    /**
-     * Small immutable object that represents Vulcan information
-     * which CaseManager can later attach to a case.
-     */
+
     public static final class VulcanEvidence {
 
         private final UUID playerUuid;
@@ -553,26 +268,34 @@ public final class VulcanIntegration {
 
                 builder.append(
                         "\nPlayer: "
-                ).append(playerName);
+                ).append(
+                        playerName
+                );
             }
 
             if (playerUuid != null) {
 
                 builder.append(
                         "\nUUID: "
-                ).append(playerUuid);
+                ).append(
+                        playerUuid
+                );
             }
 
             builder.append(
                     "\nViolation Level: "
-            ).append(violationLevel);
+            ).append(
+                    violationLevel
+            );
 
             if (profile != null &&
                     !profile.isBlank()) {
 
                 builder.append(
                         "\nProfile: "
-                ).append(profile);
+                ).append(
+                        profile
+                );
             }
 
             return builder.toString();
