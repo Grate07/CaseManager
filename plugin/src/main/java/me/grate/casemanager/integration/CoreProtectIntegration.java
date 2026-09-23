@@ -1,261 +1,152 @@
 package me.grate.casemanager.integration;
 
 import me.grate.casemanager.CaseManager;
+import net.coreprotect.CoreProtect;
+import net.coreprotect.CoreProtectAPI;
 import org.bukkit.Location;
 import org.bukkit.plugin.Plugin;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public final class CoreProtectIntegration {
 
     private final CaseManager plugin;
 
-    private Object coreProtectApi;
+    private CoreProtectAPI api;
 
-    private Method performLookupMethod;
-    private Method parseResultMethod;
-
-    private boolean available;
-
-    public CoreProtectIntegration(
-            CaseManager plugin
-    ) {
+    public CoreProtectIntegration(CaseManager plugin) {
         this.plugin = plugin;
     }
 
-    public void initialize() {
+    public boolean initialize() {
 
-        available = false;
-        coreProtectApi = null;
-        performLookupMethod = null;
-        parseResultMethod = null;
+        api = null;
 
-        Plugin coreProtect =
+        Plugin externalPlugin =
                 plugin.getServer()
                         .getPluginManager()
                         .getPlugin("CoreProtect");
 
-        if (coreProtect == null) {
+        if (!(externalPlugin instanceof CoreProtect coreProtect)) {
 
             plugin.getLogger().info(
-                    "CoreProtect not found. CoreProtect integration disabled."
+                    "CoreProtect API plugin was not found."
             );
 
-            return;
+            return false;
         }
 
-        if (!coreProtect.isEnabled()) {
+        if (!externalPlugin.isEnabled()) {
 
             plugin.getLogger().warning(
                     "CoreProtect is installed but not enabled."
             );
 
-            return;
+            return false;
         }
 
-        try {
+        CoreProtectAPI coreProtectApi =
+                coreProtect.getAPI();
 
-            Class<?> coreProtectClass =
-                    Class.forName(
-                            "net.coreprotect.CoreProtect"
-                    );
-
-            if (!coreProtectClass.isInstance(
-                    coreProtect
-            )) {
-
-                plugin.getLogger().warning(
-                        "Detected CoreProtect plugin does not expose the expected API."
-                );
-
-                return;
-            }
-
-            Method getApiMethod =
-                    coreProtectClass.getMethod(
-                            "getAPI"
-                    );
-
-            coreProtectApi =
-                    getApiMethod.invoke(
-                            coreProtect
-                    );
-
-            if (coreProtectApi == null) {
-
-                plugin.getLogger().warning(
-                        "CoreProtect returned a null API."
-                );
-
-                return;
-            }
-
-            Class<?> apiClass =
-                    coreProtectApi.getClass();
-
-            Method apiVersionMethod =
-                    apiClass.getMethod(
-                            "APIVersion"
-                    );
-
-            Object versionObject =
-                    apiVersionMethod.invoke(
-                            coreProtectApi
-                    );
-
-            int apiVersion =
-                    versionObject instanceof Number
-                            ? ((Number) versionObject).intValue()
-                            : -1;
-
-            if (apiVersion < 13) {
-
-                plugin.getLogger().warning(
-                        "CoreProtect API version " +
-                                apiVersion +
-                                " detected. API version 13 or newer is required."
-                );
-
-                reset();
-
-                return;
-            }
-
-            Method enabledMethod =
-                    apiClass.getMethod(
-                            "isEnabled"
-                    );
-
-            Object enabledObject =
-                    enabledMethod.invoke(
-                            coreProtectApi
-                    );
-
-            boolean apiEnabled =
-                    enabledObject instanceof Boolean &&
-                            (Boolean) enabledObject;
-
-            if (!apiEnabled) {
-
-                plugin.getLogger().warning(
-                        "CoreProtect API is disabled."
-                );
-
-                reset();
-
-                return;
-            }
-
-            performLookupMethod =
-                    findPerformLookupMethod(
-                            apiClass
-                    );
-
-            parseResultMethod =
-                    findParseResultMethod(
-                            apiClass
-                    );
-
-            if (performLookupMethod == null) {
-
-                plugin.getLogger().warning(
-                        "Could not find CoreProtect performLookup API method."
-                );
-
-                reset();
-
-                return;
-            }
-
-            if (parseResultMethod == null) {
-
-                plugin.getLogger().warning(
-                        "Could not find CoreProtect parseResult API method."
-                );
-
-                reset();
-
-                return;
-            }
-
-            available = true;
-
-            plugin.getLogger().info(
-                    "CoreProtect integration enabled. API version " +
-                            apiVersion +
-                            "."
-            );
-
-        } catch (ClassNotFoundException exception) {
+        if (coreProtectApi == null) {
 
             plugin.getLogger().warning(
-                    "CoreProtect API classes were not found."
+                    "CoreProtect returned a null API."
             );
 
-            reset();
-
-        } catch (
-                NoSuchMethodException |
-                IllegalAccessException |
-                InvocationTargetException exception
-        ) {
-
-            plugin.getLogger().warning(
-                    "Failed to initialize CoreProtect integration: " +
-                            exception.getMessage()
-            );
-
-            reset();
+            return false;
         }
+
+        if (!coreProtectApi.isEnabled()) {
+
+            plugin.getLogger().warning(
+                    "CoreProtect API is disabled in CoreProtect configuration."
+            );
+
+            return false;
+        }
+
+        if (coreProtectApi.APIVersion() < 13) {
+
+            plugin.getLogger().warning(
+                    "CoreProtect API version " +
+                            coreProtectApi.APIVersion() +
+                            " is too old. API v13 or newer is required."
+            );
+
+            return false;
+        }
+
+        api = coreProtectApi;
+
+        plugin.getLogger().info(
+                "CoreProtect API v" +
+                        api.APIVersion() +
+                        " connected."
+        );
+
+        return true;
     }
 
     public boolean isAvailable() {
 
-        return available &&
-                coreProtectApi != null &&
-                performLookupMethod != null &&
-                parseResultMethod != null;
+        return api != null &&
+                api.isEnabled() &&
+                api.APIVersion() >= 13;
     }
 
-    public Object getApi() {
+    public CoreProtectAPI getApi() {
 
-        return coreProtectApi;
+        return api;
     }
 
-    public List<CoreProtectRecord> lookupPlayerHistory(
+    public CompletableFuture<List<CoreProtectRecord>> lookupPlayerHistory(
             String playerName,
             int timeSeconds,
             int limit
     ) {
 
-        if (!isAvailable()) {
-            return Collections.emptyList();
-        }
-
-        if (playerName == null ||
+        if (!isAvailable() ||
+                playerName == null ||
                 playerName.isBlank()) {
 
-            return Collections.emptyList();
+            return CompletableFuture.completedFuture(
+                    Collections.emptyList()
+            );
         }
 
-        if (timeSeconds <= 0) {
-            timeSeconds = 3600;
-        }
+        int safeLimit =
+                Math.max(
+                        1,
+                        Math.min(
+                                limit,
+                                100
+                        )
+                );
 
-        if (limit <= 0) {
-            limit = 100;
-        }
+        int safeTime =
+                Math.max(
+                        1,
+                        timeSeconds
+                );
 
-        try {
+        return CompletableFuture.supplyAsync(() -> {
 
-            List<?> rows =
-                    invokePerformLookup(
-                            timeSeconds,
-                            playerName
+            List<String[]> rows =
+                    api.performPartialLookup(
+                            safeTime,
+                            List.of(playerName),
+                            null,
+                            null,
+                            null,
+                            null,
+                            0,
+                            null,
+                            0,
+                            safeLimit
                     );
 
             if (rows == null ||
@@ -267,96 +158,82 @@ public final class CoreProtectIntegration {
             List<CoreProtectRecord> records =
                     new ArrayList<>();
 
-            int count = 0;
+            for (String[] row : rows) {
 
-            for (Object rowObject : rows) {
-
-                if (rowObject == null) {
+                if (row == null) {
                     continue;
                 }
 
-                if (!(rowObject instanceof String[] row)) {
+                CoreProtectAPI.ParseResult result =
+                        api.parseResult(row);
+
+                if (result == null) {
                     continue;
                 }
 
-                CoreProtectRecord record =
-                        parseRow(row);
-
-                if (record == null) {
-                    continue;
-                }
-
-                records.add(record);
-
-                count++;
-
-                if (count >= limit) {
-                    break;
-                }
+                records.add(
+                        mapResult(result)
+                );
             }
 
             return records;
-
-        } catch (
-                IllegalAccessException |
-                InvocationTargetException exception
-        ) {
-
-            plugin.getLogger().warning(
-                    "CoreProtect lookup failed: " +
-                            getRootMessage(exception)
-            );
-
-            return Collections.emptyList();
-
-        } catch (Exception exception) {
-
-            plugin.getLogger().warning(
-                    "Unexpected CoreProtect lookup error: " +
-                            exception.getMessage()
-            );
-
-            return Collections.emptyList();
-        }
+        });
     }
 
-    public List<CoreProtectRecord> lookupLocation(
+    public CompletableFuture<List<CoreProtectRecord>> lookupLocation(
             Location location,
             int timeSeconds,
             int radius,
             int limit
     ) {
 
-        if (!isAvailable()) {
-            return Collections.emptyList();
-        }
-
-        if (location == null ||
+        if (!isAvailable() ||
+                location == null ||
                 location.getWorld() == null) {
 
-            return Collections.emptyList();
+            return CompletableFuture.completedFuture(
+                    Collections.emptyList()
+            );
         }
 
-        if (timeSeconds <= 0) {
-            timeSeconds = 3600;
-        }
+        Location searchLocation =
+                location.clone();
 
-        if (radius < 0) {
-            radius = 0;
-        }
+        int safeTime =
+                Math.max(
+                        1,
+                        timeSeconds
+                );
 
-        if (limit <= 0) {
-            limit = 100;
-        }
+        int safeRadius =
+                Math.max(
+                        0,
+                        radius
+                );
 
-        try {
+        int safeLimit =
+                Math.max(
+                        1,
+                        Math.min(
+                                limit,
+                                100
+                        )
+                );
 
-            List<?> rows =
-                    invokePerformLookup(
-                            timeSeconds,
+        return CompletableFuture.supplyAsync(() -> {
+
+            List<String[]> rows =
+                    api.performPartialLookup(
+                            safeTime,
                             null,
-                            radius,
-                            location
+                            null,
+                            null,
+                            null,
+                            null,
+                            safeRadius,
+                            searchLocation,
+                            0,
+                            safeLimit
                     );
 
             if (rows == null ||
@@ -368,596 +245,345 @@ public final class CoreProtectIntegration {
             List<CoreProtectRecord> records =
                     new ArrayList<>();
 
-            int count = 0;
+            for (String[] row : rows) {
 
-            for (Object rowObject : rows) {
-
-                if (rowObject == null) {
+                if (row == null) {
                     continue;
                 }
 
-                if (!(rowObject instanceof String[] row)) {
+                CoreProtectAPI.ParseResult result =
+                        api.parseResult(row);
+
+                if (result == null) {
                     continue;
                 }
 
-                CoreProtectRecord record =
-                        parseRow(row);
-
-                if (record == null) {
-                    continue;
-                }
-
-                records.add(record);
-
-                count++;
-
-                if (count >= limit) {
-                    break;
-                }
+                records.add(
+                        mapResult(result)
+                );
             }
 
             return records;
-
-        } catch (
-                IllegalAccessException |
-                InvocationTargetException exception
-        ) {
-
-            plugin.getLogger().warning(
-                    "CoreProtect location lookup failed: " +
-                            getRootMessage(exception)
-            );
-
-            return Collections.emptyList();
-
-        } catch (Exception exception) {
-
-            plugin.getLogger().warning(
-                    "Unexpected CoreProtect lookup error: " +
-                            exception.getMessage()
-            );
-
-            return Collections.emptyList();
-        }
+        });
     }
-    private CoreProtectRecord parseRow(
-            String[] row
-    ) {
-
-        try {
-
-            Object parseResult =
-                    parseResultMethod.invoke(
-                            coreProtectApi,
-                            (Object) row
-                    );
-
-            if (parseResult == null) {
-                return null;
-            }
-
-            Class<?> resultClass =
-                    parseResult.getClass();
-
-            String player =
-                    readString(
-                            resultClass,
-                            parseResult,
-                            "getPlayer"
-                    );
-
-            String action =
-                    readString(
-                            resultClass,
-                            parseResult,
-                            "getActionString"
-                    );
-
-            String world =
-                    readString(
-                            resultClass,
-                            parseResult,
-                            "worldName"
-                    );
-
-            Integer x =
-                    readInteger(
-                            resultClass,
-                            parseResult,
-                            "getX"
-                    );
-
-            Integer y =
-                    readInteger(
-                            resultClass,
-                            parseResult,
-                            "getY"
-                    );
-
-            Integer z =
-                    readInteger(
-                            resultClass,
-                            parseResult,
-                            "getZ"
-                    );
-
-            Long timestamp =
-                    readLong(
-                            resultClass,
-                            parseResult,
-                            "getTimestamp"
-                    );
-
-            Integer actionId =
-                    readInteger(
-                            resultClass,
-                            parseResult,
-                            "getActionId"
-                    );
-
-            String material =
-                    readMaterial(
-                            resultClass,
-                            parseResult
-                    );
-
-            String entityType =
-                    readEntityType(
-                            resultClass,
-                            parseResult
-                    );
-
-            Boolean rolledBack =
-                    readBoolean(
-                            resultClass,
-                            parseResult,
-                            "isRolledBack"
-                    );
-
-            return new CoreProtectRecord(
-                    player,
-                    action,
-                    actionId,
-                    world,
-                    x,
-                    y,
-                    z,
-                    timestamp,
-                    material,
-                    entityType,
-                    rolledBack
-            );
-
-        } catch (
-                IllegalAccessException |
-                InvocationTargetException exception
-        ) {
-
-            plugin.getLogger().warning(
-                    "Failed to parse CoreProtect result: " +
-                            getRootMessage(exception)
-            );
-
-            return null;
-
-        } catch (Exception exception) {
-
-            plugin.getLogger().warning(
-                    "Unexpected CoreProtect parsing error: " +
-                            exception.getMessage()
-            );
-
-            return null;
-        }
-    }
-
-    private Method findPerformLookupMethod(
-            Class<?> apiClass
-    ) {
-
-        for (Method method :
-                apiClass.getMethods()) {
-
-            if (!method.getName()
-                    .equals("performLookup")) {
-
-                continue;
-            }
-
-            Class<?>[] parameters =
-                    method.getParameterTypes();
-
-            if (parameters.length != 8) {
-                continue;
-            }
-
-            if (parameters[0] != int.class) {
-                continue;
-            }
-
-            if (!List.class.isAssignableFrom(
-                    parameters[1]
-            )) {
-                continue;
-            }
-
-            if (!List.class.isAssignableFrom(
-                    parameters[2]
-            )) {
-                continue;
-            }
-
-            if (!List.class.isAssignableFrom(
-                    parameters[3]
-            )) {
-                continue;
-            }
-
-            if (!List.class.isAssignableFrom(
-                    parameters[4]
-            )) {
-                continue;
-            }
-
-            if (!List.class.isAssignableFrom(
-                    parameters[5]
-            )) {
-                continue;
-            }
-
-            if (parameters[6] != int.class) {
-                continue;
-            }
-
-            if (!Location.class.isAssignableFrom(
-                    parameters[7]
-            )) {
-                continue;
-            }
-
-            return method;
-        }
-
-        return null;
-    }
-
-    private Method findParseResultMethod(
-            Class<?> apiClass
-    ) {
-
-        for (Method method :
-                apiClass.getMethods()) {
-
-            if (!method.getName()
-                    .equals("parseResult")) {
-
-                continue;
-            }
-
-            Class<?>[] parameters =
-                    method.getParameterTypes();
-
-            if (parameters.length != 1) {
-                continue;
-            }
-
-            if (parameters[0] != String[].class) {
-                continue;
-            }
-
-            return method;
-        }
-
-        return null;
-    }
-
-    private List<?> invokePerformLookup(
-            int timeSeconds,
-            String playerName
-    )
-            throws InvocationTargetException,
-            IllegalAccessException {
-
-        List<String> users =
-                playerName == null
-                        ? null
-                        : Collections.singletonList(
-                                playerName
-                        );
-
-        return invokePerformLookup(
-                timeSeconds,
-                users,
-                null,
-                0,
-                null
-        );
-    }
-
-    private List<?> invokePerformLookup(
-            int timeSeconds,
+    public CompletableFuture<List<CoreProtectRecord>> lookupPlayerAtLocation(
             String playerName,
+            Location location,
+            int timeSeconds,
             int radius,
-            Location location
-    )
-            throws InvocationTargetException,
-            IllegalAccessException {
+            int limit
+    ) {
 
-        List<String> users =
-                playerName == null
-                        ? null
-                        : Collections.singletonList(
-                                playerName
-                        );
+        if (!isAvailable() ||
+                playerName == null ||
+                playerName.isBlank() ||
+                location == null ||
+                location.getWorld() == null) {
 
-        return invokePerformLookup(
-                timeSeconds,
-                users,
-                null,
-                radius,
-                location
+            return CompletableFuture.completedFuture(
+                    Collections.emptyList()
+            );
+        }
+
+        Location searchLocation =
+                location.clone();
+
+        int safeTime =
+                Math.max(
+                        1,
+                        timeSeconds
+                );
+
+        int safeRadius =
+                Math.max(
+                        0,
+                        radius
+                );
+
+        int safeLimit =
+                Math.max(
+                        1,
+                        Math.min(
+                                limit,
+                                100
+                        )
+                );
+
+        return CompletableFuture.supplyAsync(() -> {
+
+            List<String[]> rows =
+                    api.performPartialLookup(
+                            safeTime,
+                            List.of(playerName),
+                            null,
+                            null,
+                            null,
+                            null,
+                            safeRadius,
+                            searchLocation,
+                            0,
+                            safeLimit
+                    );
+
+            if (rows == null ||
+                    rows.isEmpty()) {
+
+                return Collections.emptyList();
+            }
+
+            List<CoreProtectRecord> records =
+                    new ArrayList<>();
+
+            for (String[] row : rows) {
+
+                if (row == null) {
+                    continue;
+                }
+
+                CoreProtectAPI.ParseResult result =
+                        api.parseResult(row);
+
+                if (result == null) {
+                    continue;
+                }
+
+                records.add(
+                        mapResult(result)
+                );
+            }
+
+            return records;
+        });
+    }
+
+    private CoreProtectRecord mapResult(
+            CoreProtectAPI.ParseResult result
+    ) {
+
+        String player =
+                result.getPlayer();
+
+        String action =
+                result.getActionString();
+
+        int actionId =
+                result.getActionId();
+
+        String world =
+                result.worldName();
+
+        int x =
+                result.getX();
+
+        int y =
+                result.getY();
+
+        int z =
+                result.getZ();
+
+        long timestamp =
+                result.getTimestamp();
+
+        String material = null;
+
+        if (result.getType() != null) {
+
+            material =
+                    result.getType()
+                            .name();
+        }
+
+        String entityType = null;
+
+        if (result.getEntityType() != null) {
+
+            entityType =
+                    result.getEntityType()
+                            .name();
+        }
+
+        boolean rolledBack =
+                result.isRolledBack();
+
+        return new CoreProtectRecord(
+                player,
+                action,
+                actionId,
+                world,
+                x,
+                y,
+                z,
+                timestamp,
+                material,
+                entityType,
+                rolledBack
         );
     }
 
-    private List<?> invokePerformLookup(
-            int timeSeconds,
-            List<String> users,
-            List<String> excludedUsers,
-            int radius,
-            Location location
-    )
-            throws InvocationTargetException,
-            IllegalAccessException {
-
-        Object result =
-                performLookupMethod.invoke(
-                        coreProtectApi,
-                        timeSeconds,
-                        users,
-                        excludedUsers,
-                        null,
-                        null,
-                        null,
-                        radius,
-                        location
-                );
-
-        if (result instanceof List<?> list) {
-            return list;
-        }
-
-        return Collections.emptyList();
-    }
-
-    private String readString(
-            Class<?> resultClass,
-            Object result,
-            String methodName
-    )
-            throws Exception {
-
-        Method method =
-                resultClass.getMethod(
-                        methodName
-                );
-
-        Object value =
-                method.invoke(
-                        result
-                );
-
-        return value == null
-                ? null
-                : String.valueOf(value);
-    }
-
-    private Integer readInteger(
-            Class<?> resultClass,
-            Object result,
-            String methodName
-    )
-            throws Exception {
-
-        Method method =
-                resultClass.getMethod(
-                        methodName
-                );
-
-        Object value =
-                method.invoke(
-                        result
-                );
-
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-
-        return null;
-    }
-
-    private Long readLong(
-            Class<?> resultClass,
-            Object result,
-            String methodName
-    )
-            throws Exception {
-
-        Method method =
-                resultClass.getMethod(
-                        methodName
-                );
-
-        Object value =
-                method.invoke(
-                        result
-                );
-
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-
-        return null;
-    }
-
-    private Boolean readBoolean(
-            Class<?> resultClass,
-            Object result,
-            String methodName
-    )
-            throws Exception {
-
-        Method method =
-                resultClass.getMethod(
-                        methodName
-                );
-
-        Object value =
-                method.invoke(
-                        result
-                );
-
-        if (value instanceof Boolean booleanValue) {
-            return booleanValue;
-        }
-
-        return null;
-    }
-
-    private String readMaterial(
-            Class<?> resultClass,
-            Object result
+    public String createEvidenceSummary(
+            List<CoreProtectRecord> records
     ) {
 
-        try {
+        if (records == null ||
+                records.isEmpty()) {
 
-            Method method =
-                    resultClass.getMethod(
-                            "getType"
-                    );
-
-            Object value =
-                    method.invoke(
-                            result
-                    );
-
-            return value == null
-                    ? null
-                    : value.toString();
-
-        } catch (Exception ignored) {
-
-            return null;
-        }
-    }
-
-    private String readEntityType(
-            Class<?> resultClass,
-            Object result
-    ) {
-
-        try {
-
-            Method method =
-                    resultClass.getMethod(
-                            "getEntityType"
-                    );
-
-            Object value =
-                    method.invoke(
-                            result
-                    );
-
-            return value == null
-                    ? null
-                    : value.toString();
-
-        } catch (Exception ignored) {
-
-            return null;
-        }
-    }
-
-    private String getRootMessage(
-            Throwable throwable
-    ) {
-
-        Throwable current =
-                throwable;
-
-        while (current.getCause() != null) {
-
-            current =
-                    current.getCause();
+            return "CoreProtect: No matching history found.";
         }
 
-        String message =
-                current.getMessage();
+        StringBuilder builder =
+                new StringBuilder();
 
-        return message == null
-                ? current.getClass()
-                        .getSimpleName()
-                : message;
-    }
+        builder.append(
+                "CoreProtect Investigation Results"
+        );
 
-    private void reset() {
+        builder.append(
+                "\nRecords: "
+        ).append(
+                records.size()
+        );
 
-        available = false;
+        int index = 1;
 
-        coreProtectApi = null;
+        for (
+                CoreProtectRecord record :
+                records
+        ) {
 
-        performLookupMethod = null;
+            builder.append(
+                    "\n\n#"
+            ).append(index);
 
-        parseResultMethod = null;
+            builder.append(
+                    "\nPlayer: "
+            ).append(
+                    record.getPlayer()
+            );
+
+            builder.append(
+                    "\nAction: "
+            ).append(
+                    record.getAction()
+            );
+
+            builder.append(
+                    "\nLocation: "
+            ).append(
+                    record.getWorld()
+            ).append(
+                    " "
+            ).append(
+                    record.getX()
+            ).append(
+                    ", "
+            ).append(
+                    record.getY()
+            ).append(
+                    ", "
+            ).append(
+                    record.getZ()
+            );
+
+            if (record.getMaterial() != null) {
+
+                builder.append(
+                        "\nMaterial: "
+                ).append(
+                        record.getMaterial()
+                );
+            }
+
+            if (record.getEntityType() != null) {
+
+                builder.append(
+                        "\nEntity: "
+                ).append(
+                        record.getEntityType()
+                );
+            }
+
+            builder.append(
+                    "\nTimestamp: "
+            ).append(
+                    record.getTimestamp()
+            );
+
+            builder.append(
+                    "\nRolled back: "
+            ).append(
+                    record.isRolledBack()
+            );
+
+            index++;
+        }
+
+        return builder.toString();
     }
     public static final class CoreProtectRecord {
 
         private final String player;
         private final String action;
-        private final Integer actionId;
+        private final int actionId;
 
         private final String world;
 
-        private final Integer x;
-        private final Integer y;
-        private final Integer z;
+        private final int x;
+        private final int y;
+        private final int z;
 
-        private final Long timestamp;
+        private final long timestamp;
 
         private final String material;
         private final String entityType;
 
-        private final Boolean rolledBack;
+        private final boolean rolledBack;
 
         public CoreProtectRecord(
                 String player,
                 String action,
-                Integer actionId,
+                int actionId,
                 String world,
-                Integer x,
-                Integer y,
-                Integer z,
-                Long timestamp,
+                int x,
+                int y,
+                int z,
+                long timestamp,
                 String material,
                 String entityType,
-                Boolean rolledBack
+                boolean rolledBack
         ) {
 
-            this.player = player;
-            this.action = action;
-            this.actionId = actionId;
+            this.player =
+                    player;
 
-            this.world = world;
+            this.action =
+                    action;
 
-            this.x = x;
-            this.y = y;
-            this.z = z;
+            this.actionId =
+                    actionId;
 
-            this.timestamp = timestamp;
+            this.world =
+                    world;
 
-            this.material = material;
-            this.entityType = entityType;
+            this.x =
+                    x;
 
-            this.rolledBack = rolledBack;
+            this.y =
+                    y;
+
+            this.z =
+                    z;
+
+            this.timestamp =
+                    timestamp;
+
+            this.material =
+                    material;
+
+            this.entityType =
+                    entityType;
+
+            this.rolledBack =
+                    rolledBack;
         }
 
         public String getPlayer() {
@@ -970,7 +596,7 @@ public final class CoreProtectIntegration {
             return action;
         }
 
-        public Integer getActionId() {
+        public int getActionId() {
 
             return actionId;
         }
@@ -980,22 +606,22 @@ public final class CoreProtectIntegration {
             return world;
         }
 
-        public Integer getX() {
+        public int getX() {
 
             return x;
         }
 
-        public Integer getY() {
+        public int getY() {
 
             return y;
         }
 
-        public Integer getZ() {
+        public int getZ() {
 
             return z;
         }
 
-        public Long getTimestamp() {
+        public long getTimestamp() {
 
             return timestamp;
         }
@@ -1010,7 +636,7 @@ public final class CoreProtectIntegration {
             return entityType;
         }
 
-        public Boolean isRolledBack() {
+        public boolean isRolledBack() {
 
             return rolledBack;
         }
@@ -1021,77 +647,76 @@ public final class CoreProtectIntegration {
                     new StringBuilder();
 
             builder.append(
-                    "CoreProtect investigation result"
+                    "CoreProtect Record"
             );
 
-            if (player != null) {
+            builder.append(
+                    "\nPlayer: "
+            ).append(
+                    player
+            );
 
-                builder.append(
-                        "\nPlayer: "
-                ).append(player);
-            }
+            builder.append(
+                    "\nAction: "
+            ).append(
+                    action
+            );
 
-            if (action != null) {
+            builder.append(
+                    "\nAction ID: "
+            ).append(
+                    actionId
+            );
 
-                builder.append(
-                        "\nAction: "
-                ).append(action);
-            }
+            builder.append(
+                    "\nWorld: "
+            ).append(
+                    world
+            );
 
-            if (actionId != null) {
-
-                builder.append(
-                        "\nAction ID: "
-                ).append(actionId);
-            }
+            builder.append(
+                    "\nCoordinates: "
+            ).append(
+                    x
+            ).append(
+                    ", "
+            ).append(
+                    y
+            ).append(
+                    ", "
+            ).append(
+                    z
+            );
 
             if (material != null) {
 
                 builder.append(
                         "\nMaterial: "
-                ).append(material);
+                ).append(
+                        material
+                );
             }
 
             if (entityType != null) {
 
                 builder.append(
-                        "\nEntity: "
-                ).append(entityType);
+                        "\nEntity Type: "
+                ).append(
+                        entityType
+                );
             }
 
-            if (world != null) {
+            builder.append(
+                    "\nTimestamp: "
+            ).append(
+                    timestamp
+            );
 
-                builder.append(
-                        "\nWorld: "
-                ).append(world);
-            }
-
-            if (x != null &&
-                    y != null &&
-                    z != null) {
-
-                builder.append(
-                        "\nLocation: "
-                ).append(x)
-                        .append(", ")
-                        .append(y)
-                        .append(", ")
-                        .append(z);
-            }
-
-            if (timestamp != null) {
-
-                builder.append(
-                        "\nTimestamp: "
-                ).append(timestamp);
-            }
-
-            if (rolledBack != null) {
-
-                builder.append(
-                        "\nRolled back: "
-                ).append(rolledBack);
-            }
+            builder.append(
+                    "\nRolled Back: "
+            ).append(
+                    rolledBack
+            );
 
             return builder.toString();
         }
