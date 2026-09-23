@@ -8,6 +8,7 @@ import me.grate.casemanager.casefile.CaseTimelineService;
 import me.grate.casemanager.command.CaseCommand;
 import me.grate.casemanager.database.DatabaseManager;
 import me.grate.casemanager.database.DatabaseTables;
+import me.grate.casemanager.integration.IntegrationManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class CaseManager extends JavaPlugin {
@@ -21,6 +22,8 @@ public final class CaseManager extends JavaPlugin {
     private CaseNoteService caseNoteService;
     private CaseEvidenceService caseEvidenceService;
     private CaseInvestigatorService caseInvestigatorService;
+
+    private IntegrationManager integrationManager;
 
     @Override
     public void onEnable() {
@@ -89,6 +92,30 @@ public final class CaseManager extends JavaPlugin {
             return;
         }
 
+        /*
+         * Initialize optional integrations.
+         *
+         * CaseManager does not require these plugins.
+         *
+         * Supported integrations:
+         *
+         * - CoreProtect
+         * - Vulcan
+         * - LiteBans
+         *
+         * If an integration is not installed,
+         * CaseManager will simply disable that integration.
+         */
+
+        integrationManager =
+                new IntegrationManager(this);
+
+        integrationManager.initialize();
+
+        /*
+         * Register /case command.
+         */
+
         CaseCommand caseCommand =
                 new CaseCommand(this);
 
@@ -119,7 +146,21 @@ public final class CaseManager extends JavaPlugin {
     @Override
     public void onDisable() {
 
+        /*
+         * Shut down integrations first.
+         */
+
+        if (integrationManager != null) {
+
+            integrationManager.shutdown();
+        }
+
+        /*
+         * Close database connection pool.
+         */
+
         if (databaseManager != null) {
+
             databaseManager.close();
         }
 
@@ -131,30 +172,42 @@ public final class CaseManager extends JavaPlugin {
     }
 
     public static CaseManager getInstance() {
+
         return instance;
     }
 
     public DatabaseManager getDatabaseManager() {
+
         return databaseManager;
     }
 
     public CaseService getCaseService() {
+
         return caseService;
     }
 
     public CaseTimelineService getCaseTimelineService() {
+
         return caseTimelineService;
     }
 
     public CaseNoteService getCaseNoteService() {
+
         return caseNoteService;
     }
 
     public CaseEvidenceService getCaseEvidenceService() {
+
         return caseEvidenceService;
     }
 
     public CaseInvestigatorService getCaseInvestigatorService() {
+
         return caseInvestigatorService;
+    }
+
+    public IntegrationManager getIntegrationManager() {
+
+        return integrationManager;
     }
 }
