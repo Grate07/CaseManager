@@ -1,0 +1,94 @@
+# ============================================================
+# CaseManager Configuration
+# ============================================================
+
+# CaseManager uses Supabase PostgreSQL as its database.
+#
+# Recommended connection method for a Minecraft server is the
+# Supabase Session Pooler connection shown under:
+# Supabase Dashboard -> Connect -> Session pooler
+#
+# The Session Pooler is IPv4-compatible and is suitable for
+# persistent Java/Minecraft server connections.
+
+database:
+
+  # Supabase Session Pooler host.
+  # Copy the host exactly from Supabase Dashboard -> Connect.
+  host: "YOUR_POOLER_HOST"
+
+  # Supabase Session Pooler session-mode port.
+  # Usually 5432. Copy the value from Supabase Dashboard -> Connect.
+  port: 5432
+
+  # Supabase database name. Usually "postgres".
+  name: "postgres"
+
+  # Session Pooler username.
+  # It normally looks like: postgres.YOUR_PROJECT_REF
+  username: "postgres.YOUR_PROJECT_REF"
+
+  # Supabase database password.
+  # Do not commit a real production password to GitHub.
+  password: "CHANGE_ME"
+
+  # Maximum number of connections CaseManager keeps in its local Hikari pool.
+  # Keep this modest on the Supabase Free plan.
+  pool-size: 5
+
+  # Supabase PostgreSQL should use SSL/TLS.
+  ssl: true
+
+
+# ============================================================
+# Integrations
+# ============================================================
+
+integrations:
+
+  coreprotect:
+
+    enabled: true
+
+    evidence:
+      time-seconds: 86400
+      limit: 50
+
+
+  vulcan:
+
+    enabled: true
+
+
+  litebans:
+
+    enabled: true
+    evidence-limit: 20
+
+
+# ============================================================
+# Case Evidence
+# ============================================================
+
+evidence:
+
+  max-content-length: 10000
+  list-limit: 100
+
+
+# ============================================================
+# Cases
+# ============================================================
+
+cases:
+
+  list-limit: 50
+
+
+# ============================================================
+# Debug
+# ============================================================
+
+debug:
+
+  enabled: false
