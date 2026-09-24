@@ -1,0 +1,81 @@
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow' version '9.6.1'
+}
+
+group = 'me.grate.casemanager'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+
+    maven {
+        url = 'https://hub.spigotmc.org/nexus/content/repositories/snapshots/'
+    }
+
+    maven {
+        url = 'https://maven.playpro.com'
+    }
+}
+
+dependencies {
+    /*
+     * Minecraft server API.
+     *
+     * Provided by Spigot/Paper/Purpur at runtime.
+     * Do NOT package this inside CaseManager.
+     */
+    compileOnly 'org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT'
+
+    /*
+     * CoreProtect is provided by the Minecraft server.
+     * Do NOT package CoreProtect inside CaseManager.
+     */
+    compileOnly 'net.coreprotect:CoreProtect:25.0'
+
+    /*
+     * Database libraries.
+     *
+     * These MUST be included in the final CaseManager JAR.
+     */
+    implementation 'com.zaxxer:HikariCP:7.0.2'
+    implementation 'org.postgresql:postgresql:42.7.13'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+/*
+ * Build the final plugin JAR with HikariCP and the PostgreSQL JDBC driver
+ * included.
+ */
+tasks.named('shadowJar') {
+    archiveClassifier.set('')
+
+    /*
+     * PostgreSQL JDBC uses Java's Service Provider mechanism
+     * to register its JDBC driver.
+     */
+    mergeServiceFiles()
+
+    /*
+     * Keep dependency packages isolated from other plugins that
+     * may ship different versions of the same libraries.
+     */
+    relocate 'com.zaxxer.hikari', 'me.grate.casemanager.libs.hikari'
+    relocate 'org.postgresql', 'me.grate.casemanager.libs.postgresql'
+}
+
+/*
+ * Make the normal build produce the shaded plugin JAR.
+ */
+tasks.named('build') {
+    dependsOn tasks.named('shadowJar')
+}
