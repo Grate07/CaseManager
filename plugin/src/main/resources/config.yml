@@ -66,14 +66,82 @@ integrations:
     evidence-limit: 20
 
 
+  # ----------------------------------------------------------
+  # Floodgate / Bedrock Support
+  # ----------------------------------------------------------
+  #
+  # CaseManager does not require Floodgate.
+  #
+  # When enabled, CaseManager will detect Floodgate if it is
+  # installed on the server and can identify Bedrock players.
+  #
+  # The core plugin remains compatible with:
+  # - Spigot
+  # - Paper
+  # - Purpur
+  # - Java players
+  # - Bedrock players through Geyser/Floodgate
+  #
+  # UUID remains the primary player identity.
+  #
+
+  floodgate:
+
+    enabled: true
+
+
 # ============================================================
 # Case Evidence
 # ============================================================
 
 evidence:
 
+  # Maximum amount of text allowed in normal evidence content.
   max-content-length: 10000
+
+  # Maximum number of evidence entries returned by evidence lists.
   list-limit: 100
+
+
+# ============================================================
+# Evidence Storage
+# ============================================================
+#
+# Actual image/video files are NOT stored inside PostgreSQL.
+#
+# PostgreSQL stores metadata such as:
+#
+#   storage_path
+#   original_filename
+#   mime_type
+#   file_size
+#
+# The actual file will be stored by the configured storage
+# provider.
+#
+# Supabase Storage is the planned provider.
+#
+
+storage:
+
+  enabled: true
+
+  # Current storage provider.
+  provider: "supabase"
+
+  # Supabase Storage bucket used for case evidence.
+  #
+  # Create this bucket in:
+  # Supabase Dashboard -> Storage
+  #
+  # We will configure the exact bucket/security model later.
+  bucket: "case-evidence"
+
+  # Maximum image upload size.
+  max-image-size-mb: 10
+
+  # Maximum video upload size.
+  max-video-size-mb: 100
 
 
 # ============================================================
@@ -82,6 +150,7 @@ evidence:
 
 cases:
 
+  # Maximum number of cases returned by /case list.
   list-limit: 50
 
 
