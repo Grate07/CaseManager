@@ -2,41 +2,44 @@
 # CaseManager Configuration
 # ============================================================
 
-# CaseManager uses Supabase PostgreSQL as its database.
-#
-# Recommended connection method for a Minecraft server is the
-# Supabase Session Pooler connection shown under:
-# Supabase Dashboard -> Connect -> Session pooler
-#
-# The Session Pooler is IPv4-compatible and is suitable for
-# persistent Java/Minecraft server connections.
+# ============================================================
+# Database
+# ============================================================
 
 database:
 
   # Supabase Session Pooler host.
-  # Copy the host exactly from Supabase Dashboard -> Connect.
+  #
+  # Copy this from:
+  # Supabase Dashboard -> Connect -> Session Pooler
+  #
   host: "YOUR_POOLER_HOST"
 
-  # Supabase Session Pooler session-mode port.
-  # Usually 5432. Copy the value from Supabase Dashboard -> Connect.
+  # Supabase Session Pooler port.
+  # Usually 5432.
   port: 5432
 
-  # Supabase database name. Usually "postgres".
+  # Database name.
+  # Usually "postgres".
   name: "postgres"
 
   # Session Pooler username.
-  # It normally looks like: postgres.YOUR_PROJECT_REF
+  #
+  # Usually:
+  # postgres.YOUR_PROJECT_REF
+  #
   username: "postgres.YOUR_PROJECT_REF"
 
   # Supabase database password.
-  # Do not commit a real production password to GitHub.
+  #
+  # NEVER commit a real production password to GitHub.
   password: "CHANGE_ME"
 
-  # Maximum number of connections CaseManager keeps in its local Hikari pool.
-  # Keep this modest on the Supabase Free plan.
+  # Maximum number of PostgreSQL connections in the
+  # local HikariCP connection pool.
   pool-size: 5
 
-  # Supabase PostgreSQL should use SSL/TLS.
+  # Use PostgreSQL SSL/TLS.
   ssl: true
 
 
@@ -46,41 +49,52 @@ database:
 
 integrations:
 
+  # ----------------------------------------------------------
+  # CoreProtect
+  # ----------------------------------------------------------
+
   coreprotect:
 
     enabled: true
 
     evidence:
+      # How far back CaseManager should search when collecting
+      # CoreProtect investigation evidence.
       time-seconds: 86400
+
+      # Maximum CoreProtect records collected per investigation.
       limit: 50
 
+
+  # ----------------------------------------------------------
+  # Vulcan
+  # ----------------------------------------------------------
 
   vulcan:
 
     enabled: true
 
 
+  # ----------------------------------------------------------
+  # LiteBans
+  # ----------------------------------------------------------
+
   litebans:
 
     enabled: true
+
+    # Maximum punishment records collected from LiteBans.
     evidence-limit: 20
 
 
   # ----------------------------------------------------------
-  # Floodgate / Bedrock Support
+  # Floodgate / Geyser Bedrock Support
   # ----------------------------------------------------------
   #
-  # CaseManager does not require Floodgate.
+  # Floodgate is OPTIONAL.
   #
-  # When enabled, CaseManager will detect Floodgate if it is
-  # installed on the server and can identify Bedrock players.
-  #
-  # The core plugin remains compatible with:
-  # - Spigot
-  # - Paper
-  # - Purpur
-  # - Java players
-  # - Bedrock players through Geyser/Floodgate
+  # CaseManager continues working normally when Floodgate
+  # is not installed.
   #
   # UUID remains the primary player identity.
   #
@@ -96,10 +110,11 @@ integrations:
 
 evidence:
 
-  # Maximum amount of text allowed in normal evidence content.
+  # Maximum length of normal text evidence.
   max-content-length: 10000
 
-  # Maximum number of evidence entries returned by evidence lists.
+  # Maximum number of evidence records returned by
+  # /case evidence list.
   list-limit: 100
 
 
@@ -107,35 +122,79 @@ evidence:
 # Evidence Storage
 # ============================================================
 #
-# Actual image/video files are NOT stored inside PostgreSQL.
+# CaseManager does NOT store image/video binary data inside
+# PostgreSQL.
 #
-# PostgreSQL stores metadata such as:
+# PostgreSQL stores the evidence metadata:
 #
 #   storage_path
 #   original_filename
 #   mime_type
 #   file_size
 #
-# The actual file will be stored by the configured storage
-# provider.
+# The actual files are stored in Supabase Storage.
 #
-# Supabase Storage is the planned provider.
+# The bucket should be PRIVATE.
+#
+# Staff access will use temporary signed URLs.
 #
 
 storage:
 
+  # Enable external evidence file storage.
   enabled: true
 
-  # Current storage provider.
+  # Storage provider.
+  #
+  # Currently supported:
+  # supabase
+  #
   provider: "supabase"
 
-  # Supabase Storage bucket used for case evidence.
+  # Supabase Storage bucket.
   #
   # Create this bucket in:
   # Supabase Dashboard -> Storage
   #
-  # We will configure the exact bucket/security model later.
   bucket: "case-evidence"
+
+  # ----------------------------------------------------------
+  # Supabase Storage Connection
+  # ----------------------------------------------------------
+
+  supabase:
+
+    # Your Supabase project URL.
+    #
+    # Example:
+    # https://abcdefghijklmnop.supabase.co
+    #
+    # Recommended alternative:
+    # Set the environment variable:
+    #
+    # CASEMANAGER_SUPABASE_URL
+    #
+    url: ""
+
+    # --------------------------------------------------------
+    # Supabase Secret Key
+    # --------------------------------------------------------
+    #
+    # DO NOT put your real secret key into GitHub.
+    #
+    # Recommended:
+    #
+    # CASEMANAGER_SUPABASE_SECRET_KEY
+    #
+    # Set it as an environment variable on the Minecraft
+    # server instead.
+    #
+    secret-key: ""
+
+
+  # ----------------------------------------------------------
+  # Upload Limits
+  # ----------------------------------------------------------
 
   # Maximum image upload size.
   max-image-size-mb: 10
@@ -150,7 +209,10 @@ storage:
 
 cases:
 
-  # Maximum number of cases returned by /case list.
+  # Maximum number of cases returned by:
+  #
+  # /case list
+  #
   list-limit: 50
 
 
@@ -160,4 +222,5 @@ cases:
 
 debug:
 
+  # Enable additional diagnostic logging.
   enabled: false
