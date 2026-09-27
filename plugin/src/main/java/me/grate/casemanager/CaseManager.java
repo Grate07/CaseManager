@@ -10,6 +10,7 @@ import me.grate.casemanager.database.DatabaseManager;
 import me.grate.casemanager.database.DatabaseTables;
 import me.grate.casemanager.integration.EvidenceIntegrationService;
 import me.grate.casemanager.integration.IntegrationManager;
+import me.grate.casemanager.storage.StorageManager;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -28,6 +29,8 @@ public final class CaseManager extends JavaPlugin {
     private IntegrationManager integrationManager;
     private EvidenceIntegrationService evidenceIntegrationService;
 
+    private StorageManager storageManager;
+
     @Override
     public void onEnable() {
 
@@ -40,9 +43,9 @@ public final class CaseManager extends JavaPlugin {
         );
 
         /*
-         * ========================================================
-         * Database
-         * ========================================================
+         * =========================================================
+         * DATABASE
+         * =========================================================
          */
 
         databaseManager =
@@ -65,9 +68,9 @@ public final class CaseManager extends JavaPlugin {
             );
 
             /*
-             * ====================================================
-             * Services
-             * ====================================================
+             * =====================================================
+             * CASE SERVICES
+             * =====================================================
              */
 
             caseTimelineService =
@@ -120,18 +123,42 @@ public final class CaseManager extends JavaPlugin {
             return;
         }
 
+
         /*
-         * ========================================================
-         * Optional Integrations
-         * ========================================================
-         *
-         * CaseManager does not require:
-         *
-         * - CoreProtect
-         * - Vulcan
-         * - LiteBans
-         *
-         * They are detected and initialized independently.
+         * =========================================================
+         * EVIDENCE STORAGE
+         * =========================================================
+         */
+
+        try {
+
+            storageManager =
+                    new StorageManager(this);
+
+            storageManager.initialize();
+
+        } catch (Exception exception) {
+
+            getLogger().severe(
+                    "Failed to initialize evidence storage."
+            );
+
+            exception.printStackTrace();
+
+            cleanup();
+
+            getServer()
+                    .getPluginManager()
+                    .disablePlugin(this);
+
+            return;
+        }
+
+
+        /*
+         * =========================================================
+         * OPTIONAL INTEGRATIONS
+         * =========================================================
          */
 
         try {
@@ -165,10 +192,11 @@ public final class CaseManager extends JavaPlugin {
             return;
         }
 
+
         /*
-         * ========================================================
-         * /case Command
-         * ========================================================
+         * =========================================================
+         * /CASE COMMAND
+         * =========================================================
          */
 
         PluginCommand casePluginCommand =
@@ -200,14 +228,25 @@ public final class CaseManager extends JavaPlugin {
                 caseCommand
         );
 
+
         /*
-         * ========================================================
-         * Startup Complete
-         * ========================================================
+         * =========================================================
+         * STARTUP COMPLETE
+         * =========================================================
          */
 
         getLogger().info(
                 "CaseManager enabled!"
+        );
+
+        getLogger().info(
+                "Evidence storage provider: " +
+                        storageManager.getProviderName()
+        );
+
+        getLogger().info(
+                "Evidence storage available: " +
+                        storageManager.isAvailable()
         );
 
         getLogger().info(
@@ -227,17 +266,36 @@ public final class CaseManager extends JavaPlugin {
         );
     }
 
-    /*
-     * ============================================================
-     * Cleanup
-     * ============================================================
-     */
-
     private void cleanup() {
 
         /*
-         * Shutdown integrations first.
+         * =========================================================
+         * STORAGE
+         * =========================================================
          */
+
+        if (storageManager != null) {
+
+            try {
+
+                storageManager.shutdown();
+
+            } catch (Exception exception) {
+
+                getLogger().warning(
+                        "Failed to shut down evidence storage: " +
+                                getRootMessage(exception)
+                );
+            }
+        }
+
+
+        /*
+         * =========================================================
+         * INTEGRATIONS
+         * =========================================================
+         */
+
         if (integrationManager != null) {
 
             try {
@@ -253,9 +311,13 @@ public final class CaseManager extends JavaPlugin {
             }
         }
 
+
         /*
-         * Close the database after integrations have stopped.
+         * =========================================================
+         * DATABASE
+         * =========================================================
          */
+
         if (databaseManager != null) {
 
             try {
@@ -271,21 +333,22 @@ public final class CaseManager extends JavaPlugin {
             }
         }
 
-        /*
-         * Clear references.
-         */
-        evidenceIntegrationService = null;
 
+        /*
+         * =========================================================
+         * CLEAR REFERENCES
+         * =========================================================
+         */
+
+        storageManager = null;
+
+        evidenceIntegrationService = null;
         integrationManager = null;
 
         caseService = null;
-
         caseTimelineService = null;
-
         caseNoteService = null;
-
         caseEvidenceService = null;
-
         caseInvestigatorService = null;
 
         databaseManager = null;
@@ -325,10 +388,11 @@ public final class CaseManager extends JavaPlugin {
         return message;
     }
 
+
     /*
-     * ============================================================
-     * Getters
-     * ============================================================
+     * =========================================================
+     * STATIC ACCESS
+     * =========================================================
      */
 
     public static CaseManager getInstance() {
@@ -336,10 +400,24 @@ public final class CaseManager extends JavaPlugin {
         return instance;
     }
 
+
+    /*
+     * =========================================================
+     * DATABASE
+     * =========================================================
+     */
+
     public DatabaseManager getDatabaseManager() {
 
         return databaseManager;
     }
+
+
+    /*
+     * =========================================================
+     * CASE SERVICES
+     * =========================================================
+     */
 
     public CaseService getCaseService() {
 
@@ -366,13 +444,33 @@ public final class CaseManager extends JavaPlugin {
         return caseInvestigatorService;
     }
 
+
+    /*
+     * =========================================================
+     * INTEGRATIONS
+     * =========================================================
+     */
+
     public IntegrationManager getIntegrationManager() {
 
         return integrationManager;
     }
 
-    public EvidenceIntegrationService getEvidenceIntegrationService() {
+    public EvidenceIntegrationService
+    getEvidenceIntegrationService() {
 
         return evidenceIntegrationService;
+    }
+
+
+    /*
+     * =========================================================
+     * STORAGE
+     * =========================================================
+     */
+
+    public StorageManager getStorageManager() {
+
+        return storageManager;
     }
 }
