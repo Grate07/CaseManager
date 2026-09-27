@@ -7,6 +7,7 @@ softdepend:
   - CoreProtect
   - Vulcan
   - LiteBans
+  - floodgate
 
 description: Advanced moderation case management system.
 author: Grate
