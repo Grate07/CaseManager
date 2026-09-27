@@ -17,8 +17,11 @@ public final class IntegrationManager {
     private CoreProtectIntegration coreProtectIntegration;
     private VulcanIntegration vulcanIntegration;
     private LiteBansIntegration liteBansIntegration;
+    private FloodgateIntegration floodgateIntegration;
 
-    public IntegrationManager(CaseManager plugin) {
+    public IntegrationManager(
+            CaseManager plugin
+    ) {
         this.plugin = plugin;
     }
 
@@ -33,15 +36,23 @@ public final class IntegrationManager {
         coreProtectIntegration = null;
         vulcanIntegration = null;
         liteBansIntegration = null;
+        floodgateIntegration = null;
 
         initializeCoreProtect();
         initializeVulcan();
         initializeLiteBans();
+        initializeFloodgate();
 
         plugin.getLogger().info(
                 "Integration initialization complete."
         );
     }
+
+    /*
+     * =========================================================
+     * COREPROTECT
+     * =========================================================
+     */
 
     private void initializeCoreProtect() {
 
@@ -61,6 +72,7 @@ public final class IntegrationManager {
         }
 
         if (!detectPlugin("CoreProtect")) {
+
             return;
         }
 
@@ -100,6 +112,12 @@ public final class IntegrationManager {
         }
     }
 
+    /*
+     * =========================================================
+     * VULCAN
+     * =========================================================
+     */
+
     private void initializeVulcan() {
 
         boolean enabled =
@@ -118,6 +136,7 @@ public final class IntegrationManager {
         }
 
         if (!detectPlugin("Vulcan")) {
+
             return;
         }
 
@@ -156,6 +175,12 @@ public final class IntegrationManager {
         }
     }
 
+    /*
+     * =========================================================
+     * LITEBANS
+     * =========================================================
+     */
+
     private void initializeLiteBans() {
 
         boolean enabled =
@@ -174,6 +199,7 @@ public final class IntegrationManager {
         }
 
         if (!detectPlugin("LiteBans")) {
+
             return;
         }
 
@@ -211,6 +237,88 @@ public final class IntegrationManager {
             liteBansIntegration = null;
         }
     }
+
+    /*
+     * =========================================================
+     * FLOODGATE
+     * =========================================================
+     */
+
+    private void initializeFloodgate() {
+
+        boolean enabled =
+                plugin.getConfig().getBoolean(
+                        "integrations.floodgate.enabled",
+                        true
+                );
+
+        if (!enabled) {
+
+            plugin.getLogger().info(
+                    "Floodgate integration is disabled by configuration."
+            );
+
+            return;
+        }
+
+        /*
+         * Floodgate is optional.
+         *
+         * We do not require it to initialize CaseManager.
+         */
+
+        if (!detectPlugin("floodgate")) {
+
+            plugin.getLogger().info(
+                    "Floodgate not found. Bedrock platform detection "
+                            + "will remain unavailable."
+            );
+
+            return;
+        }
+
+        try {
+
+            floodgateIntegration =
+                    new FloodgateIntegration(
+                            plugin
+                    );
+
+            boolean initialized =
+                    floodgateIntegration.initialize();
+
+            if (initialized) {
+
+                plugin.getLogger().info(
+                        "Floodgate integration enabled."
+                );
+
+            } else {
+
+                plugin.getLogger().warning(
+                        "Floodgate was detected, but its API "
+                                + "could not be initialized."
+                );
+
+                floodgateIntegration = null;
+            }
+
+        } catch (Exception exception) {
+
+            plugin.getLogger().warning(
+                    "Failed to initialize Floodgate integration: " +
+                            getExceptionMessage(exception)
+            );
+
+            floodgateIntegration = null;
+        }
+    }
+
+    /*
+     * =========================================================
+     * PLUGIN DETECTION
+     * =========================================================
+     */
 
     private boolean detectPlugin(
             String pluginName
@@ -265,6 +373,7 @@ public final class IntegrationManager {
     ) {
 
         if (pluginName == null) {
+
             return false;
         }
 
@@ -273,11 +382,18 @@ public final class IntegrationManager {
         );
     }
 
+    /*
+     * =========================================================
+     * GENERAL ACCESS
+     * =========================================================
+     */
+
     public boolean isAvailable(
             String pluginName
     ) {
 
         if (pluginName == null) {
+
             return false;
         }
 
@@ -291,6 +407,7 @@ public final class IntegrationManager {
     ) {
 
         if (pluginName == null) {
+
             return null;
         }
 
@@ -298,6 +415,12 @@ public final class IntegrationManager {
                 pluginName.toLowerCase()
         );
     }
+
+    /*
+     * =========================================================
+     * INTEGRATION GETTERS
+     * =========================================================
+     */
 
     public CoreProtectIntegration getCoreProtect() {
 
@@ -313,6 +436,17 @@ public final class IntegrationManager {
 
         return liteBansIntegration;
     }
+
+    public FloodgateIntegration getFloodgate() {
+
+        return floodgateIntegration;
+    }
+
+    /*
+     * =========================================================
+     * AVAILABILITY
+     * =========================================================
+     */
 
     public boolean isCoreProtectAvailable() {
 
@@ -332,12 +466,30 @@ public final class IntegrationManager {
                 liteBansIntegration.isAvailable();
     }
 
+    public boolean isFloodgateAvailable() {
+
+        return floodgateIntegration != null &&
+                floodgateIntegration.isAvailable();
+    }
+
+    /*
+     * =========================================================
+     * DETECTED PLUGINS
+     * =========================================================
+     */
+
     public Map<String, Plugin> getDetectedPlugins() {
 
         return Collections.unmodifiableMap(
                 detectedPlugins
         );
     }
+
+    /*
+     * =========================================================
+     * SHUTDOWN
+     * =========================================================
+     */
 
     public void shutdown() {
 
@@ -346,17 +498,25 @@ public final class IntegrationManager {
         coreProtectIntegration = null;
         vulcanIntegration = null;
         liteBansIntegration = null;
+        floodgateIntegration = null;
 
         plugin.getLogger().info(
                 "Integration manager shut down."
         );
     }
 
+    /*
+     * =========================================================
+     * ERROR HANDLING
+     * =========================================================
+     */
+
     private String getExceptionMessage(
             Throwable throwable
     ) {
 
         if (throwable == null) {
+
             return "Unknown error";
         }
 
@@ -364,7 +524,9 @@ public final class IntegrationManager {
                 throwable;
 
         while (current.getCause() != null) {
-            current = current.getCause();
+
+            current =
+                    current.getCause();
         }
 
         String message =
