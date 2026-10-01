@@ -5,8 +5,14 @@ const {
     Events
 } = require("discord.js");
 
-const config = require("./config");
-const database = require("./database/database");
+const config =
+    require("./config");
+
+const database =
+    require("./database/database");
+
+const permissionService =
+    require("./permissions/permissionService");
 
 
 /*
@@ -14,16 +20,22 @@ const database = require("./database/database");
  * CaseManager Discord Bot
  * ============================================================
  *
- * Main entry point.
+ * Main Discord client entry point.
  *
  * Responsibilities:
- * - Create Discord client
+ *
+ * - Create the Discord client
  * - Initialize PostgreSQL
  * - Load slash commands
- * - Load interaction events
- * - Validate permission configuration
- * - Log into Discord
- * - Gracefully shut down
+ * - Register interaction handlers
+ * - Validate Discord permission configuration
+ * - Start the bot
+ * - Gracefully shut everything down
+ *
+ * CaseManager uses the same PostgreSQL database as the
+ * Minecraft plugin.
+ *
+ * Discord UI uses Components V2.
  * ============================================================
  */
 
@@ -34,16 +46,20 @@ const database = require("./database/database");
  * ============================================================
  */
 
-const client = new Client({
+const client =
+    new Client({
 
-    intents: [
-        GatewayIntentBits.Guilds
-    ]
-});
+        intents: [
+            GatewayIntentBits.Guilds
+        ]
+
+    });
 
 
 /*
- * Store slash commands.
+ * ============================================================
+ * Command Collection
+ * ============================================================
  */
 
 client.commands =
@@ -51,9 +67,7 @@ client.commands =
 
 
 /*
- * ============================================================
- * Load Commands
- * ============================================================
+ * Load /case command.
  */
 
 const caseCommand =
@@ -66,16 +80,7 @@ client.commands.set(
 
 
 /*
- * ============================================================
- * Interaction Handler
- * ============================================================
- *
- * The actual interaction handler will be implemented in:
- *
- * src/events/interactionCreate.js
- *
- * We load it here so the main entry point stays clean.
- * ============================================================
+ * Load interaction handler.
  */
 
 const interactionCreate =
@@ -89,7 +94,7 @@ client.on(
 
 /*
  * ============================================================
- * Discord Ready
+ * Discord Ready Event
  * ============================================================
  */
 
@@ -108,10 +113,9 @@ client.once(
         console.log(
             `[CaseManager] Loaded ${client.commands.size} command(s).`
         );
+
     }
 );
-
-
 /*
  * ============================================================
  * Startup
@@ -128,15 +132,18 @@ async function start() {
 
 
         /*
-         * Initialize PostgreSQL.
+         * ----------------------------------------------------
+         * Initialize PostgreSQL
+         * ----------------------------------------------------
          */
 
         database.initialize();
 
 
         /*
-         * Verify the database connection before
-         * attempting to log into Discord.
+         * ----------------------------------------------------
+         * Test PostgreSQL connection
+         * ----------------------------------------------------
          */
 
         await database.testConnection();
@@ -147,17 +154,38 @@ async function start() {
 
 
         /*
-         * Validate permission configuration.
+         * ----------------------------------------------------
+         * Load permission configuration
+         * ----------------------------------------------------
+         *
+         * The permission system is database-backed.
+         *
+         * A guild can use:
+         *
+         * global
+         * or
+         * per-command
+         *
+         * mode.
+         *
+         * The permission service is asynchronous because
+         * settings can come from PostgreSQL.
+         * ----------------------------------------------------
          */
 
-        const permissionService =
-            require("./permissions/permissionService");
-
-        const permissionConfig =
-            permissionService.validateConfiguration();
+        const permissionValidation =
+            await validatePermissionConfiguration();
 
 
-        if (!permissionConfig.valid) {
+        /*
+         * ----------------------------------------------------
+         * Display permission configuration status
+         * ----------------------------------------------------
+         */
+
+        if (
+            !permissionValidation.valid
+        ) {
 
             console.warn(
                 "[CaseManager] Permission configuration warning:"
@@ -165,24 +193,28 @@ async function start() {
 
             for (
                 const error
-                of permissionConfig.errors
+                of permissionValidation.errors
             ) {
 
                 console.warn(
                     `[CaseManager] - ${error}`
                 );
+
             }
 
         } else {
 
             console.log(
-                `[CaseManager] ${permissionService.getModeDescription()}`
+                "[CaseManager] Discord permission configuration is valid."
             );
+
         }
 
 
         /*
-         * Log into Discord.
+         * ----------------------------------------------------
+         * Login to Discord
+         * ----------------------------------------------------
          */
 
         await client.login(
@@ -198,8 +230,7 @@ async function start() {
 
 
         /*
-         * Try to clean up the database if startup
-         * partially succeeded.
+         * Make sure PostgreSQL is closed if startup fails.
          */
 
         try {
@@ -212,33 +243,117 @@ async function start() {
                 "[CaseManager] Database shutdown error:",
                 shutdownError
             );
+
         }
 
 
         process.exitCode = 1;
+
     }
+
 }
 
 
 /*
  * ============================================================
- * Graceful Shutdown
+ * Permission Configuration Validation
  * ============================================================
  */
 
-let shuttingDown = false;
+async function validatePermissionConfiguration() {
+
+    const guildId =
+        config.discord.guildId;
+
+
+    /*
+     * No guild ID means the bot cannot determine which
+     * server's database settings should be loaded.
+     */
+
+    if (!guildId) {
+
+        return {
+
+            valid: false,
+
+            errors: [
+                "DISCORD_GUILD_ID is not configured."
+            ]
+
+        };
+
+    }
+
+
+    try {
+
+        const validation =
+            await permissionService.validateGuild(
+                guildId
+            );
+
+
+        return validation;
+
+    } catch (error) {
+
+        console.error(
+            "[CaseManager] Failed to validate Discord permissions:",
+            error
+        );
+
+
+        return {
+
+            valid: false,
+
+            errors: [
+                `Could not validate permission settings: ${error.message}`
+            ]
+
+        };
+
+    }
+
+}
+/*
+ * ============================================================
+ * Graceful Shutdown
+ * ============================================================
+ *
+ * The bot needs to close both:
+ *
+ * 1. Discord connection
+ * 2. PostgreSQL connection pool
+ *
+ * before the process exits.
+ * ============================================================
+ */
+
+let shuttingDown =
+    false;
 
 
 async function shutdown(
     signal
 ) {
 
-    if (shuttingDown) {
+    /*
+     * Prevent multiple shutdown handlers from running
+     * simultaneously.
+     */
+
+    if (
+        shuttingDown
+    ) {
 
         return;
+
     }
 
-    shuttingDown = true;
+    shuttingDown =
+        true;
 
 
     console.log(
@@ -249,17 +364,24 @@ async function shutdown(
     try {
 
         /*
-         * Destroy Discord connection.
+         * ----------------------------------------------------
+         * Disconnect Discord
+         * ----------------------------------------------------
          */
 
-        if (client) {
+        if (
+            client
+        ) {
 
             client.destroy();
+
         }
 
 
         /*
-         * Close PostgreSQL pool.
+         * ----------------------------------------------------
+         * Close PostgreSQL
+         * ----------------------------------------------------
          */
 
         await database.shutdown();
@@ -281,30 +403,47 @@ async function shutdown(
         process.exit(
             0
         );
+
     }
+
 }
-
-
 /*
  * ============================================================
- * Process Signals
+ * Process Signal Handlers
  * ============================================================
  */
 
 process.once(
     "SIGINT",
-    () => shutdown("SIGINT")
+    () => {
+
+        shutdown(
+            "SIGINT"
+        );
+
+    }
 );
+
 
 process.once(
     "SIGTERM",
-    () => shutdown("SIGTERM")
+    () => {
+
+        shutdown(
+            "SIGTERM"
+        );
+
+    }
 );
 
 
 /*
  * ============================================================
- * Unhandled Errors
+ * Error Handling
+ * ============================================================
+ *
+ * These handlers prevent unexpected asynchronous errors from
+ * disappearing silently.
  * ============================================================
  */
 
@@ -316,6 +455,7 @@ process.on(
             "[CaseManager] Unhandled promise rejection:",
             error
         );
+
     }
 );
 
@@ -328,14 +468,43 @@ process.on(
             "[CaseManager] Uncaught exception:",
             error
         );
+
     }
 );
-
-
 /*
  * ============================================================
- * Start
+ * Startup Invocation
+ * ============================================================
+ *
+ * This must remain at the bottom of the file so all event
+ * handlers and functions have already been registered before
+ * the bot starts connecting.
  * ============================================================
  */
 
 start();
+/*
+ * ============================================================
+ * END OF discord/src/index.js
+ * ============================================================
+ *
+ * IMPORTANT:
+ *
+ * Do NOT add:
+ *
+ * permissionService.validateConfiguration()
+ *
+ * or:
+ *
+ * permissionService.getModeDescription()
+ *
+ * here.
+ *
+ * The new permission system is database-backed and uses:
+ *
+ *     await permissionService.validateGuild(...)
+ *
+ * instead.
+ *
+ * ============================================================
+ */
