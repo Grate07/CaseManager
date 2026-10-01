@@ -29,8 +29,9 @@ const {
  * - Slash commands
  * - Case buttons
  * - Components V2 navigation
+ * - Server-side permission checks
  *
- * Permission checks are performed server-side.
+ * Permission settings are stored in PostgreSQL.
  * ============================================================
  */
 
@@ -47,7 +48,9 @@ module.exports = async function interactionCreate(
          * ====================================================
          */
 
-        if (interaction.isChatInputCommand()) {
+        if (
+            interaction.isChatInputCommand()
+        ) {
 
             await handleCommand(
                 interaction
@@ -63,7 +66,9 @@ module.exports = async function interactionCreate(
          * ====================================================
          */
 
-        if (interaction.isButton()) {
+        if (
+            interaction.isButton()
+        ) {
 
             await handleButton(
                 interaction
@@ -99,14 +104,18 @@ async function handleCommand(
     interaction
 ) {
 
-    if (!interaction.inGuild()) {
+    if (
+        !interaction.inGuild()
+    ) {
 
         await interaction.reply({
+
             components: [
                 errorPanel(
                     "CaseManager commands can only be used inside a Discord server."
                 )
             ],
+
             flags:
                 MessageFlags.IsComponentsV2 |
                 MessageFlags.Ephemeral
@@ -125,11 +134,13 @@ async function handleCommand(
     if (!command) {
 
         await interaction.reply({
+
             components: [
                 errorPanel(
                     "This command is not available."
                 )
             ],
+
             flags:
                 MessageFlags.IsComponentsV2 |
                 MessageFlags.Ephemeral
@@ -140,18 +151,14 @@ async function handleCommand(
 
 
     /*
-     * The command itself performs its own permission check.
-     *
-     * This keeps command-specific permission logic close
-     * to the command implementation.
+     * The command performs its own server-side permission
+     * check.
      */
 
     await command.execute(
         interaction
     );
 }
-
-
 /*
  * ============================================================
  * Button handler
@@ -162,7 +169,9 @@ async function handleButton(
     interaction
 ) {
 
-    if (!interaction.inGuild()) {
+    if (
+        !interaction.inGuild()
+    ) {
 
         await safelyRespond(
             interaction,
@@ -176,14 +185,10 @@ async function handleButton(
 
 
     /*
-     * All CaseManager buttons begin with one of:
-     *
-     * case:
-     * settings:
-     *
+     * ========================================================
+     * Case buttons
      * ========================================================
      */
-
 
     if (
         interaction.customId.startsWith(
@@ -192,16 +197,20 @@ async function handleButton(
     ) {
 
         /*
-         * Buttons are part of the /case system,
-         * therefore they use the same permission.
+         * IMPORTANT:
+         *
+         * hasPermission() is asynchronous because permission
+         * settings are loaded from PostgreSQL.
          */
 
-        if (
-            !permissionService.hasPermission(
+        const allowed =
+            await permissionService.hasPermission(
                 interaction.member,
                 "case"
-            )
-        ) {
+            );
+
+
+        if (!allowed) {
 
             await safelyRespond(
                 interaction,
@@ -223,8 +232,9 @@ async function handleButton(
 
 
     /*
-     * Settings buttons will be implemented when
-     * the settings/permission UI is wired.
+     * ========================================================
+     * Settings buttons
+     * ========================================================
      */
 
     if (
@@ -233,12 +243,14 @@ async function handleButton(
         )
     ) {
 
-        if (
-            !permissionService.hasPermission(
+        const allowed =
+            await permissionService.hasPermission(
                 interaction.member,
                 "settings"
-            )
-        ) {
+            );
+
+
+        if (!allowed) {
 
             await safelyRespond(
                 interaction,
@@ -266,7 +278,7 @@ async function handleButton(
 
 /*
  * ============================================================
- * Case buttons
+ * Case button router
  * ============================================================
  */
 
@@ -279,15 +291,16 @@ async function handleCaseButton(
 
 
     /*
-     * Example:
+     * Examples:
      *
      * case:view:15
-     *
-     * parts:
-     *
-     * [0] case
-     * [1] view
-     * [2] 15
+     * case:evidence:15
+     * case:evidence:add:15
+     * case:timeline:15
+     * case:investigators:15
+     * case:assign:15
+     * case:unassign:15
+     * case:status:OPEN:15
      */
 
 
@@ -295,36 +308,34 @@ async function handleCaseButton(
         parts[1];
 
 
-    const caseId =
-        Number.parseInt(
-            parts[2],
-            10
-        );
-
-
-    if (
-        !Number.isInteger(caseId) ||
-        caseId <= 0
-    ) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "Invalid case ID."
-            )
-        );
-
-        return;
-    }
-
-
     /*
-     * ========================================================
+     * --------------------------------------------------------
      * View
-     * ========================================================
+     * --------------------------------------------------------
      */
 
-    if (action === "view") {
+    if (
+        action === "view"
+    ) {
+
+        const caseId =
+            parseCaseId(
+                parts[2]
+            );
+
+
+        if (!caseId) {
+
+            await safelyRespond(
+                interaction,
+                errorPanel(
+                    "Invalid case ID."
+                )
+            );
+
+            return;
+        }
+
 
         await showCase(
             interaction,
@@ -336,12 +347,74 @@ async function handleCaseButton(
 
 
     /*
-     * ========================================================
+     * --------------------------------------------------------
      * Evidence
-     * ========================================================
+     * --------------------------------------------------------
+     *
+     * This MUST check "add" before normal evidence viewing.
+     *
+     * Otherwise:
+     *
+     * case:evidence:add:15
+     *
+     * would incorrectly treat "add" as the case ID.
+     * --------------------------------------------------------
      */
 
-    if (action === "evidence") {
+    if (
+        action === "evidence"
+    ) {
+
+        if (
+            parts[2] === "add"
+        ) {
+
+            const caseId =
+                parseCaseId(
+                    parts[3]
+                );
+
+
+            if (!caseId) {
+
+                await safelyRespond(
+                    interaction,
+                    errorPanel(
+                        "Invalid case ID."
+                    )
+                );
+
+                return;
+            }
+
+
+            await handleAddEvidence(
+                interaction,
+                caseId
+            );
+
+            return;
+        }
+
+
+        const caseId =
+            parseCaseId(
+                parts[2]
+            );
+
+
+        if (!caseId) {
+
+            await safelyRespond(
+                interaction,
+                errorPanel(
+                    "Invalid case ID."
+                )
+            );
+
+            return;
+        }
+
 
         await showEvidence(
             interaction,
@@ -350,15 +423,34 @@ async function handleCaseButton(
 
         return;
     }
-
-
     /*
-     * ========================================================
+     * --------------------------------------------------------
      * Timeline
-     * ========================================================
+     * --------------------------------------------------------
      */
 
-    if (action === "timeline") {
+    if (
+        action === "timeline"
+    ) {
+
+        const caseId =
+            parseCaseId(
+                parts[2]
+            );
+
+
+        if (!caseId) {
+
+            await safelyRespond(
+                interaction,
+                errorPanel(
+                    "Invalid case ID."
+                )
+            );
+
+            return;
+        }
+
 
         await showTimeline(
             interaction,
@@ -370,12 +462,33 @@ async function handleCaseButton(
 
 
     /*
-     * ========================================================
+     * --------------------------------------------------------
      * Investigators
-     * ========================================================
+     * --------------------------------------------------------
      */
 
-    if (action === "investigators") {
+    if (
+        action === "investigators"
+    ) {
+
+        const caseId =
+            parseCaseId(
+                parts[2]
+            );
+
+
+        if (!caseId) {
+
+            await safelyRespond(
+                interaction,
+                errorPanel(
+                    "Invalid case ID."
+                )
+            );
+
+            return;
+        }
+
 
         await showInvestigators(
             interaction,
@@ -387,11 +500,9 @@ async function handleCaseButton(
 
 
     /*
-     * ========================================================
+     * --------------------------------------------------------
      * Assign / Unassign
-     * ========================================================
-     *
-     * Actual player selection will be added later.
+     * --------------------------------------------------------
      */
 
     if (
@@ -399,14 +510,29 @@ async function handleCaseButton(
         action === "unassign"
     ) {
 
-        await safelyRespond(
+        const caseId =
+            parseCaseId(
+                parts[2]
+            );
+
+
+        if (!caseId) {
+
+            await safelyRespond(
+                interaction,
+                errorPanel(
+                    "Invalid case ID."
+                )
+            );
+
+            return;
+        }
+
+
+        await handleInvestigatorAction(
             interaction,
-            infoPanel(
-                action === "assign"
-                    ? "Assign Investigator"
-                    : "Unassign Investigator",
-                `Investigator selection for Case #${caseId} will be connected here.`
-            )
+            action,
+            caseId
         );
 
         return;
@@ -414,39 +540,20 @@ async function handleCaseButton(
 
 
     /*
-     * ========================================================
-     * Add Evidence
-     * ========================================================
-     */
-
-    if (action === "evidence" &&
-        parts[2] === "add") {
-
-        await safelyRespond(
-            interaction,
-            infoPanel(
-                "Add Evidence",
-                `The evidence upload form for Case #${caseId} will be connected here.`
-            )
-        );
-
-        return;
-    }
-
-
-    /*
-     * ========================================================
+     * --------------------------------------------------------
      * Status
-     * ========================================================
+     * --------------------------------------------------------
      *
      * Format:
      *
      * case:status:OPEN:15
      *
-     * Therefore status buttons require special parsing.
+     * Status therefore needs its own parser.
      */
 
-    if (action === "status") {
+    if (
+        action === "status"
+    ) {
 
         await handleStatusButton(
             interaction,
@@ -468,6 +575,118 @@ async function handleCaseButton(
 
 /*
  * ============================================================
+ * Case ID parser
+ * ============================================================
+ */
+
+function parseCaseId(
+    value
+) {
+
+    const parsed =
+        Number.parseInt(
+            value,
+            10
+        );
+
+
+    if (
+        !Number.isInteger(parsed) ||
+        parsed <= 0
+    ) {
+
+        return null;
+    }
+
+
+    return parsed;
+}
+
+
+/*
+ * ============================================================
+ * Add Evidence
+ * ============================================================
+ */
+
+async function handleAddEvidence(
+    interaction,
+    caseId
+) {
+
+    const caseData =
+        await getCase(
+            caseId
+        );
+
+
+    if (!caseData) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                `Case #${caseId} was not found.`
+            )
+        );
+
+        return;
+    }
+
+
+    await safelyRespond(
+        interaction,
+        infoPanel(
+            "Add Evidence",
+            `The evidence upload form for Case #${caseId} will be connected here.`
+        )
+    );
+}
+
+
+/*
+ * ============================================================
+ * Investigator actions
+ * ============================================================
+ */
+
+async function handleInvestigatorAction(
+    interaction,
+    action,
+    caseId
+) {
+
+    const caseData =
+        await getCase(
+            caseId
+        );
+
+
+    if (!caseData) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                `Case #${caseId} was not found.`
+            )
+        );
+
+        return;
+    }
+
+
+    await safelyRespond(
+        interaction,
+        infoPanel(
+            action === "assign"
+                ? "Assign Investigator"
+                : "Unassign Investigator",
+
+            `Investigator selection for Case #${caseId} will be connected here.`
+        )
+    );
+}
+/*
+ * ============================================================
  * Status buttons
  * ============================================================
  */
@@ -478,24 +697,24 @@ async function handleStatusButton(
 ) {
 
     /*
+     * Expected:
+     *
      * case:status:OPEN:15
      */
 
     const status =
-        parts[2];
+        String(
+            parts[2] || ""
+        ).toUpperCase();
 
 
     const caseId =
-        Number.parseInt(
-            parts[3],
-            10
+        parseCaseId(
+            parts[3]
         );
 
 
-    if (
-        !Number.isInteger(caseId) ||
-        caseId <= 0
-    ) {
+    if (!caseId) {
 
         await safelyRespond(
             interaction,
@@ -535,14 +754,38 @@ async function handleStatusButton(
     }
 
 
+    const caseData =
+        await getCase(
+            caseId
+        );
+
+
+    if (!caseData) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                `Case #${caseId} was not found.`
+            )
+        );
+
+        return;
+    }
+
+
     /*
-     * We deliberately do not silently change the database yet.
+     * --------------------------------------------------------
+     * IMPORTANT
+     * --------------------------------------------------------
      *
-     * The Minecraft CaseManager service already owns the
-     * case-management logic.
+     * We do not directly mutate the database here yet.
      *
-     * The Discord status action will call the same database
-     * contract once the shared mutation/service layer is wired.
+     * The Minecraft plugin owns the existing case-management
+     * service layer. Discord must eventually call the same
+     * mutation contract instead of duplicating business logic.
+     *
+     * For now the button safely identifies the requested
+     * operation.
      */
 
     await safelyRespond(
@@ -568,7 +811,9 @@ async function showCase(
 ) {
 
     const caseData =
-        await getCase(caseId);
+        await getCase(
+            caseId
+        );
 
 
     if (!caseData) {
@@ -605,7 +850,9 @@ async function showEvidence(
 ) {
 
     const caseData =
-        await getCase(caseId);
+        await getCase(
+            caseId
+        );
 
 
     if (!caseData) {
@@ -622,7 +869,9 @@ async function showEvidence(
 
 
     const evidence =
-        await getEvidence(caseId);
+        await getEvidence(
+            caseId
+        );
 
 
     await safelyRespond(
@@ -647,7 +896,9 @@ async function showTimeline(
 ) {
 
     const caseData =
-        await getCase(caseId);
+        await getCase(
+            caseId
+        );
 
 
     if (!caseData) {
@@ -664,7 +915,9 @@ async function showTimeline(
 
 
     const timeline =
-        await getTimeline(caseId);
+        await getTimeline(
+            caseId
+        );
 
 
     await safelyRespond(
@@ -675,8 +928,6 @@ async function showTimeline(
         )
     );
 }
-
-
 /*
  * ============================================================
  * Show Investigators
@@ -689,7 +940,9 @@ async function showInvestigators(
 ) {
 
     const caseData =
-        await getCase(caseId);
+        await getCase(
+            caseId
+        );
 
 
     if (!caseData) {
@@ -706,7 +959,9 @@ async function showInvestigators(
 
 
     const investigators =
-        await getInvestigators(caseId);
+        await getInvestigators(
+            caseId
+        );
 
 
     await safelyRespond(
@@ -750,7 +1005,9 @@ async function getCase(
         );
 
 
-    if (!result.rows.length) {
+    if (
+        !result.rows.length
+    ) {
 
         return null;
     }
@@ -922,8 +1179,6 @@ async function getTimeline(
         })
     );
 }
-
-
 /*
  * ============================================================
  * Database — Investigators
@@ -1003,7 +1258,8 @@ async function safelyRespond(
     ) {
 
         await interaction.editReply({
-            components: payload.components
+            components:
+                payload.components
         });
 
     } else {
@@ -1013,3 +1269,10 @@ async function safelyRespond(
         );
     }
 }
+
+
+/*
+ * ============================================================
+ * END OF interactionCreate.js
+ * ============================================================
+ */
