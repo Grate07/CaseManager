@@ -142,11 +142,11 @@ async function execute(interaction) {
 
 
     if (
-        !permissionService.hasPermission(
-            interaction.member,
-            "case"
-        )
-    ) {
+    !(await permissionService.hasPermission(
+        interaction.member,
+        "case"
+    ))
+) {
 
         await interaction.reply({
             components: [
