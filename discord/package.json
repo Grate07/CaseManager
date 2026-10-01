@@ -1,0 +1,16 @@
+{
+  "name": "casemanager-discord",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CaseManager Discord integration",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "register": "node src/commands/register.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.24.2",
+    "dotenv": "^17.2.2",
+    "pg": "^8.16.3"
+  }
+}
