@@ -2,217 +2,119 @@
 # CaseManager Configuration
 # ============================================================
 
-# ============================================================
-# Database
-# ============================================================
-
 database:
-
-  # Supabase Session Pooler host.
-  #
-  # Copy this from:
-  # Supabase Dashboard -> Connect -> Session Pooler
-  #
   host: "YOUR_POOLER_HOST"
-
-  # Supabase Session Pooler port.
-  # Usually 5432.
   port: 5432
-
-  # Database name.
-  # Usually "postgres".
   name: "postgres"
-
-  # Session Pooler username.
-  #
-  # Usually:
-  # postgres.YOUR_PROJECT_REF
-  #
   username: "postgres.YOUR_PROJECT_REF"
-
-  # Supabase database password.
-  #
-  # NEVER commit a real production password to GitHub.
   password: "CHANGE_ME"
-
-  # Maximum number of PostgreSQL connections in the
-  # local HikariCP connection pool.
   pool-size: 5
-
-  # Use PostgreSQL SSL/TLS.
   ssl: true
 
 
 # ============================================================
-# Integrations
+# External Plugin Integrations
 # ============================================================
 
 integrations:
 
-  # ----------------------------------------------------------
-  # CoreProtect
-  # ----------------------------------------------------------
-
   coreprotect:
-
     enabled: true
 
     evidence:
-      # How far back CaseManager should search when collecting
-      # CoreProtect investigation evidence.
       time-seconds: 86400
-
-      # Maximum CoreProtect records collected per investigation.
       limit: 50
 
 
-  # ----------------------------------------------------------
-  # Vulcan
-  # ----------------------------------------------------------
-
   vulcan:
-
     enabled: true
 
-
-  # ----------------------------------------------------------
-  # LiteBans
-  # ----------------------------------------------------------
 
   litebans:
-
     enabled: true
 
-    # Maximum punishment records collected from LiteBans.
     evidence-limit: 20
 
 
-  # ----------------------------------------------------------
-  # Floodgate / Geyser Bedrock Support
-  # ----------------------------------------------------------
-  #
-  # Floodgate is OPTIONAL.
-  #
-  # CaseManager continues working normally when Floodgate
-  # is not installed.
-  #
-  # UUID remains the primary player identity.
-  #
-
   floodgate:
-
     enabled: true
 
 
 # ============================================================
-# Case Evidence
+# Evidence
 # ============================================================
 
 evidence:
 
-  # Maximum length of normal text evidence.
+  # Maximum length for normal text evidence.
   max-content-length: 10000
 
-  # Maximum number of evidence records returned by
-  # /case evidence list.
+  # Maximum number of evidence entries returned by a list request.
   list-limit: 100
 
 
 # ============================================================
-# Evidence Storage
+# Supabase Storage
 # ============================================================
-#
-# CaseManager does NOT store image/video binary data inside
-# PostgreSQL.
-#
-# PostgreSQL stores the evidence metadata:
-#
-#   storage_path
-#   original_filename
-#   mime_type
-#   file_size
-#
-# The actual files are stored in Supabase Storage.
-#
-# The bucket should be PRIVATE.
-#
-# Staff access will use temporary signed URLs.
-#
 
 storage:
 
-  # Enable external evidence file storage.
+  # Completely disables media storage when false.
   enabled: true
 
-  # Storage provider.
-  #
   # Currently supported:
-  # supabase
-  #
+  #   supabase
   provider: "supabase"
 
   # Supabase Storage bucket.
-  #
-  # Create this bucket in:
-  # Supabase Dashboard -> Storage
-  #
   bucket: "case-evidence"
-
-  # ----------------------------------------------------------
-  # Supabase Storage Connection
-  # ----------------------------------------------------------
 
   supabase:
 
-    # Your Supabase project URL.
-    #
     # Example:
-    # https://abcdefghijklmnop.supabase.co
-    #
-    # Recommended alternative:
-    # Set the environment variable:
-    #
-    # CASEMANAGER_SUPABASE_URL
-    #
+    # https://xxxxxxxxxxxxxxxx.supabase.co
     url: ""
 
-    # --------------------------------------------------------
-    # Supabase Secret Key
-    # --------------------------------------------------------
+    # IMPORTANT:
+    # Use the Supabase server-side secret/service-role key here.
     #
-    # DO NOT put your real secret key into GitHub.
-    #
-    # Recommended:
-    #
-    # CASEMANAGER_SUPABASE_SECRET_KEY
-    #
-    # Set it as an environment variable on the Minecraft
-    # server instead.
-    #
+    # Do NOT use the public anon key.
     secret-key: ""
 
 
   # ----------------------------------------------------------
-  # Upload Limits
+  # File limits
   # ----------------------------------------------------------
 
-  # Maximum image upload size.
+  # Maximum image size.
   max-image-size-mb: 10
 
-  # Maximum video upload size.
+  # Maximum video size.
   max-video-size-mb: 100
+
+  # General safety limit for uploaded files.
+  max-file-size-mb: 100
+
+
+  # ----------------------------------------------------------
+  # Signed URLs
+  # ----------------------------------------------------------
+
+  # How long generated private-storage URLs remain valid.
+  #
+  # 3600 = 1 hour
+  # 1800 = 30 minutes
+  # 7200 = 2 hours
+  signed-url-expiry-seconds: 3600
 
 
 # ============================================================
-# Cases
+# Case System
 # ============================================================
 
 cases:
 
-  # Maximum number of cases returned by:
-  #
-  # /case list
-  #
+  # Maximum number of cases returned by /case list.
   list-limit: 50
 
 
@@ -222,5 +124,4 @@ cases:
 
 debug:
 
-  # Enable additional diagnostic logging.
   enabled: false
