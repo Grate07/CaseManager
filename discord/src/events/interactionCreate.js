@@ -261,9 +261,8 @@ async function handleButton(
     ) {
 
         const allowed =
-            await permissionService.hasPermission(
+            await permissionService.canManagePermissions(
                 interaction.member,
-                "settings"
             );
 
 
