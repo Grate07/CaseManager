@@ -11,33 +11,31 @@ const {
 const permissionService =
     require("../permissions/permissionService");
 
-const {
-    ONYX
-} = require("./theme");
-
 
 /*
  * ============================================================
  * CaseManager — Discord Settings UI
  * ============================================================
  *
- * Components V2 permission-management interface.
+ * Components V2 only.
  *
  * Supports:
  *
- * - Global permission mode
- * - Per-command permission mode
- * - Global role display
- * - Per-command role display
+ *  • Global permission mode
+ *  • Per-command permission mode
+ *  • Global role
+ *  • Per-command roles
+ *  • Role selection
+ *  • Role clearing
  *
- * Database saving is handled by permissionService.
+ * Actual persistence is handled by permissionService.
  * ============================================================
  */
 
 
 /*
  * ============================================================
- * Settings Panel
+ * Permission settings panel
  * ============================================================
  */
 
@@ -54,12 +52,6 @@ async function permissionSettingsPanel(
     const container =
         new ContainerBuilder();
 
-
-    /*
-     * --------------------------------------------------------
-     * Header
-     * --------------------------------------------------------
-     */
 
     container.addTextDisplayComponents(
         new TextDisplayBuilder()
@@ -78,12 +70,6 @@ async function permissionSettingsPanel(
     );
 
 
-    /*
-     * --------------------------------------------------------
-     * Current mode
-     * --------------------------------------------------------
-     */
-
     const modeLabel =
         settings.mode === "per-command"
             ? "Per-command"
@@ -98,12 +84,6 @@ async function permissionSettingsPanel(
     );
 
 
-    /*
-     * --------------------------------------------------------
-     * Global role
-     * --------------------------------------------------------
-     */
-
     const globalRole =
         settings.globalRoleId
             ? `<@&${settings.globalRoleId}>`
@@ -117,12 +97,6 @@ async function permissionSettingsPanel(
             )
     );
 
-
-    /*
-     * --------------------------------------------------------
-     * Per-command roles
-     * --------------------------------------------------------
-     */
 
     if (
         settings.mode === "per-command"
@@ -147,12 +121,6 @@ async function permissionSettingsPanel(
     }
 
 
-    /*
-     * --------------------------------------------------------
-     * Controls
-     * --------------------------------------------------------
-     */
-
     container.addSeparatorComponents(
         new SeparatorBuilder()
             .setSpacing(
@@ -162,9 +130,7 @@ async function permissionSettingsPanel(
 
 
     container.addActionRowComponents(
-        createPermissionButtons(
-            settings
-        )
+        createPermissionButtons()
     );
 
 
@@ -174,7 +140,7 @@ async function permissionSettingsPanel(
 
 /*
  * ============================================================
- * Command role text
+ * Command role display
  * ============================================================
  */
 
@@ -244,20 +210,20 @@ function formatRole(
     ) {
 
         return `${name}: <@&${roleId}>`;
-
     }
+
 
     return `${name}: Not configured`;
 }
+
+
 /*
  * ============================================================
- * Permission buttons
+ * Main permission buttons
  * ============================================================
  */
 
-function createPermissionButtons(
-    settings
-) {
+function createPermissionButtons() {
 
     const modeButton =
         new ButtonBuilder()
@@ -427,16 +393,11 @@ function permissionModePanel(
 
     return container;
 }
+
+
 /*
  * ============================================================
- * Role configuration panel
- * ============================================================
- *
- * This panel displays the roles currently stored in the
- * database.
- *
- * Actual role selection/editing will use Discord components
- * in the interaction handler.
+ * Permission roles panel
  * ============================================================
  */
 
@@ -466,139 +427,85 @@ function permissionRolesPanel(
 
 
     /*
-     * Global role.
+     * Show current role summary.
      */
 
-    const globalButton =
-        new ButtonBuilder()
-            .setCustomId(
-                "settings:permissions:role:global"
-            )
-            .setLabel(
-                "Global Role"
-            )
-            .setStyle(
-                ButtonStyle.Primary
-            );
-
-
-    /*
-     * Command roles.
-     */
-
-    const caseButton =
-        new ButtonBuilder()
-            .setCustomId(
-                "settings:permissions:role:case"
-            )
-            .setLabel(
-                "Case"
-            )
-            .setStyle(
-                ButtonStyle.Secondary
-            );
-
-
-    const evidenceButton =
-        new ButtonBuilder()
-            .setCustomId(
-                "settings:permissions:role:evidence"
-            )
-            .setLabel(
-                "Evidence"
-            )
-            .setStyle(
-                ButtonStyle.Secondary
-            );
-
-
-    const timelineButton =
-        new ButtonBuilder()
-            .setCustomId(
-                "settings:permissions:role:timeline"
-            )
-            .setLabel(
-                "Timeline"
-            )
-            .setStyle(
-                ButtonStyle.Secondary
-            );
-
-
-    const investigatorsButton =
-        new ButtonBuilder()
-            .setCustomId(
-                "settings:permissions:role:investigators"
-            )
-            .setLabel(
-                "Investigators"
-            )
-            .setStyle(
-                ButtonStyle.Secondary
-            );
-
-
-    const statusButton =
-        new ButtonBuilder()
-            .setCustomId(
-                "settings:permissions:role:status"
-            )
-            .setLabel(
-                "Status"
-            )
-            .setStyle(
-                ButtonStyle.Secondary
-            );
-
-
-    const settingsButton =
-        new ButtonBuilder()
-            .setCustomId(
-                "settings:permissions:role:settings"
-            )
-            .setLabel(
-                "Settings"
-            )
-            .setStyle(
-                ButtonStyle.Secondary
-            );
-
-
-    const permissionsButton =
-        new ButtonBuilder()
-            .setCustomId(
-                "settings:permissions:role:permissions"
-            )
-            .setLabel(
-                "Permissions"
-            )
-            .setStyle(
-                ButtonStyle.Secondary
-            );
-
-
-    /*
-     * Discord ActionRows support a maximum of five buttons.
-     */
-
-    container.addActionRowComponents(
-        new ActionRowBuilder()
-            .addComponents(
-                globalButton,
-                caseButton,
-                evidenceButton,
-                timelineButton,
-                investigatorsButton
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder()
+            .setContent(
+                buildRoleSummary(settings)
             )
     );
 
 
+    container.addSeparatorComponents(
+        new SeparatorBuilder()
+            .setSpacing(
+                SeparatorSpacingSize.Small
+            )
+    );
+
+
+    /*
+     * First row.
+     */
+
     container.addActionRowComponents(
         new ActionRowBuilder()
             .addComponents(
-                statusButton,
-                settingsButton,
-                permissionsButton,
+
+                createRoleButton(
+                    "global",
+                    "Global",
+                    ButtonStyle.Primary
+                ),
+
+                createRoleButton(
+                    "case",
+                    "Case"
+                ),
+
+                createRoleButton(
+                    "evidence",
+                    "Evidence"
+                ),
+
+                createRoleButton(
+                    "timeline",
+                    "Timeline"
+                ),
+
+                createRoleButton(
+                    "investigators",
+                    "Investigators"
+                )
+            )
+    );
+
+
+    /*
+     * Second row.
+     */
+
+    container.addActionRowComponents(
+        new ActionRowBuilder()
+            .addComponents(
+
+                createRoleButton(
+                    "status",
+                    "Status"
+                ),
+
+                createRoleButton(
+                    "settings",
+                    "Settings"
+                ),
+
+                createRoleButton(
+                    "permissions",
+                    "Permissions"
+                ),
+
                 new ButtonBuilder()
                     .setCustomId(
                         "settings:permissions"
@@ -615,9 +522,82 @@ function permissionRolesPanel(
 
     return container;
 }
+
+
 /*
  * ============================================================
- * Role selection information panel
+ * Role button
+ * ============================================================
+ */
+
+function createRoleButton(
+    roleType,
+    label,
+    style = ButtonStyle.Secondary
+) {
+
+    return new ButtonBuilder()
+        .setCustomId(
+            `settings:permissions:role:${roleType}`
+        )
+        .setLabel(
+            label
+        )
+        .setStyle(
+            style
+        );
+}
+
+
+/*
+ * ============================================================
+ * Role summary
+ * ============================================================
+ */
+
+function buildRoleSummary(
+    settings
+) {
+
+    const global =
+        settings.globalRoleId
+            ? `<@&${settings.globalRoleId}>`
+            : "Not configured";
+
+
+    const roles =
+        settings.perCommand || {};
+
+
+    return [
+        `**Global:** ${global}`,
+        `**Case:** ${formatRoleValue(roles.case)}`,
+        `**Evidence:** ${formatRoleValue(roles.evidence)}`,
+        `**Timeline:** ${formatRoleValue(roles.timeline)}`,
+        `**Investigators:** ${formatRoleValue(roles.investigators)}`,
+        `**Status:** ${formatRoleValue(roles.status)}`,
+        `**Settings:** ${formatRoleValue(roles.settings)}`,
+        `**Permissions:** ${formatRoleValue(roles.permissions)}`
+    ].join("\n");
+}
+
+
+function formatRoleValue(
+    roleId
+) {
+
+    return roleId &&
+        String(roleId).trim() !== ""
+
+        ? `<@&${roleId}>`
+
+        : "Not configured";
+}
+
+
+/*
+ * ============================================================
+ * Individual role configuration panel
  * ============================================================
  */
 
@@ -625,10 +605,6 @@ function roleSelectionPanel(
     roleType,
     settings
 ) {
-
-    const container =
-        new ContainerBuilder();
-
 
     const labels = {
 
@@ -654,20 +630,34 @@ function roleSelectionPanel(
             "Settings Command Role",
 
         permissions:
-            "Permissions Command Role"
+            "Permission Management Role"
     };
 
 
     const label =
-        labels[roleType] ||
+        labels[
+            String(roleType || "")
+                .toLowerCase()
+        ] ||
         "CaseManager Role";
+
+
+    const currentRole =
+        getRoleId(
+            roleType,
+            settings
+        );
+
+
+    const container =
+        new ContainerBuilder();
 
 
     container.addTextDisplayComponents(
         new TextDisplayBuilder()
             .setContent(
                 `# ${label}\n` +
-                "Use the role configuration controls to assign a Discord role to this permission."
+                "Configure the Discord role used for this permission."
             )
     );
 
@@ -678,13 +668,6 @@ function roleSelectionPanel(
                 SeparatorSpacingSize.Small
             )
     );
-
-
-    const currentRole =
-        getRoleId(
-            roleType,
-            settings
-        );
 
 
     container.addTextDisplayComponents(
@@ -714,7 +697,7 @@ function roleSelectionPanel(
                         `settings:permissions:setrole:${roleType}`
                     )
                     .setLabel(
-                        "Set Role"
+                        "Select Role"
                     )
                     .setStyle(
                         ButtonStyle.Primary
@@ -761,16 +744,19 @@ function getRoleId(
 ) {
 
     if (
-        roleType === "global"
+        String(roleType || "")
+            .toLowerCase() === "global"
     ) {
 
         return settings.globalRoleId || "";
-
     }
 
 
     return (
-        settings.perCommand?.[roleType] ||
+        settings.perCommand?.[
+            String(roleType || "")
+                .toLowerCase()
+        ] ||
         ""
     );
 }
@@ -778,12 +764,7 @@ function getRoleId(
 
 /*
  * ============================================================
- * Save helper
- * ============================================================
- *
- * This is intentionally exported so the interaction handler
- * can save permission settings through the existing
- * permissionService.
+ * Save permission settings
  * ============================================================
  */
 
