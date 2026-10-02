@@ -11,11 +11,19 @@ const {
 } = require("discord.js");
 
 const config = require("../config");
+
 const permissionService =
     require("../permissions/permissionService");
 
 const caseMutationService =
     require("../services/caseMutationService");
+
+const discordEvidenceService =
+    require("../services/discordEvidenceService");
+
+const {
+    evidenceUploadModal
+} = require("../ui/evidenceModal");
 
 const {
     casePanel,
@@ -46,103 +54,85 @@ const {
  * Handles:
  *
  *  • Slash commands
- *  • Case buttons
+ *  • Buttons
+ *  • String select menus
+ *  • Role select menus
+ *  • Modal submissions
+ *  • Evidence uploads
  *  • Case status changes
  *  • Investigator controls
  *  • Permission settings
- *  • Discord role selection
  *
- * Components V2 only.
+ * Components V2 is used for normal bot responses.
  * ============================================================
  */
 
 
 /*
  * ============================================================
- * Main handler
+ * Main interaction router
  * ============================================================
  */
 
 async function handleInteraction(interaction) {
 
-    try {
+    if (
+        interaction.isChatInputCommand()
+    ) {
 
-        if (
-            interaction.isChatInputCommand()
-        ) {
-
-            await handleChatInputCommand(
-                interaction
-            );
-
-            return;
-        }
-
-
-        /*
-         * RoleSelectMenu must be checked separately.
-         */
-
-        if (
-            interaction.isRoleSelectMenu()
-        ) {
-
-            await handleRoleSelect(
-                interaction
-            );
-
-            return;
-        }
-
-
-        if (
-            interaction.isStringSelectMenu()
-        ) {
-
-            await handleStringSelect(
-                interaction
-            );
-
-            return;
-        }
-
-
-        if (
-            interaction.isButton()
-        ) {
-
-            await handleButton(
-                interaction
-            );
-
-            return;
-        }
-
-    } catch (error) {
-
-        if (
-            error instanceof
-            InteractionHandledError
-        ) {
-
-            return;
-        }
-
-
-        console.error(
-            "[CaseManager] Interaction error:",
-            error
+        await handleChatInputCommand(
+            interaction
         );
 
+        return;
+    }
 
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                config.bot.debug
-                    ? `Error: ${error.message}`
-                    : "An unexpected error occurred."
-            )
+
+    if (
+        interaction.isModalSubmit()
+    ) {
+
+        await handleModalSubmit(
+            interaction
         );
+
+        return;
+    }
+
+
+    if (
+        interaction.isRoleSelectMenu()
+    ) {
+
+        await handleRoleSelect(
+            interaction
+        );
+
+        return;
+    }
+
+
+    if (
+        interaction.isStringSelectMenu()
+    ) {
+
+        await handleStringSelect(
+            interaction
+        );
+
+        return;
+    }
+
+
+    if (
+        interaction.isButton()
+    ) {
+
+        await handleButton(
+            interaction
+        );
+
+        return;
     }
 }
 
@@ -251,7 +241,7 @@ async function handleCaseButton(
 
     /*
      * --------------------------------------------------------
-     * View
+     * View case
      * --------------------------------------------------------
      */
 
@@ -260,7 +250,9 @@ async function handleCaseButton(
     ) {
 
         const caseId =
-            parseCaseId(parts[2]);
+            parseCaseId(
+                parts[2]
+            );
 
 
         await requirePermission(
@@ -288,12 +280,18 @@ async function handleCaseButton(
         action === "evidence"
     ) {
 
+        /*
+         * case:evidence:add:<caseId>
+         */
+
         if (
             parts[2] === "add"
         ) {
 
             const caseId =
-                parseCaseId(parts[3]);
+                parseCaseId(
+                    parts[3]
+                );
 
 
             await requirePermission(
@@ -311,8 +309,14 @@ async function handleCaseButton(
         }
 
 
+        /*
+         * case:evidence:<caseId>
+         */
+
         const caseId =
-            parseCaseId(parts[2]);
+            parseCaseId(
+                parts[2]
+            );
 
 
         await requirePermission(
@@ -341,7 +345,9 @@ async function handleCaseButton(
     ) {
 
         const caseId =
-            parseCaseId(parts[2]);
+            parseCaseId(
+                parts[2]
+            );
 
 
         await requirePermission(
@@ -370,7 +376,9 @@ async function handleCaseButton(
     ) {
 
         const caseId =
-            parseCaseId(parts[2]);
+            parseCaseId(
+                parts[2]
+            );
 
 
         await requirePermission(
@@ -399,7 +407,9 @@ async function handleCaseButton(
     ) {
 
         const caseId =
-            parseCaseId(parts[2]);
+            parseCaseId(
+                parts[2]
+            );
 
 
         await requirePermission(
@@ -428,7 +438,9 @@ async function handleCaseButton(
     ) {
 
         const caseId =
-            parseCaseId(parts[2]);
+            parseCaseId(
+                parts[2]
+            );
 
 
         await requirePermission(
@@ -495,7 +507,7 @@ async function handleCaseButton(
 
 /*
  * ============================================================
- * Show case
+ * Case display
  * ============================================================
  */
 
@@ -534,7 +546,7 @@ async function showCase(
 
 /*
  * ============================================================
- * Show evidence
+ * Evidence display
  * ============================================================
  */
 
@@ -580,7 +592,7 @@ async function showEvidence(
 
 /*
  * ============================================================
- * Show timeline
+ * Timeline display
  * ============================================================
  */
 
@@ -626,7 +638,7 @@ async function showTimeline(
 
 /*
  * ============================================================
- * Show investigators
+ * Investigator display
  * ============================================================
  */
 
@@ -672,7 +684,7 @@ async function showInvestigators(
 
 /*
  * ============================================================
- * Evidence upload placeholder
+ * Begin evidence upload
  * ============================================================
  */
 
@@ -701,23 +713,307 @@ async function beginEvidenceAdd(
 
 
     /*
-     * We intentionally do not create a fake evidence record.
+     * Discord modals are sent directly to the user.
      *
-     * The final implementation will connect Discord
-     * attachments to MediaEvidenceService.
+     * The modal contains the native Discord File Upload
+     * component.
      */
 
-    await safelyRespond(
-        interaction,
-        infoPanel(
-            "Discord evidence upload is not connected yet. " +
-            "No database record was created."
+    await interaction.showModal(
+        evidenceUploadModal(
+            caseId
         )
     );
 }
 /*
  * ============================================================
- * Change case status
+ * Modal submissions
+ * ============================================================
+ */
+
+async function handleModalSubmit(
+    interaction
+) {
+
+    const customId =
+        String(
+            interaction.customId || ""
+        );
+
+
+    /*
+     * --------------------------------------------------------
+     * Evidence upload
+     * --------------------------------------------------------
+     */
+
+    if (
+        customId.startsWith(
+            "case:evidence:upload:"
+        )
+    ) {
+
+        await handleEvidenceUploadModal(
+            interaction
+        );
+
+        return;
+    }
+
+
+    await safelyRespond(
+        interaction,
+        errorPanel(
+            "This form is no longer available."
+        )
+    );
+}
+
+
+/*
+ * ============================================================
+ * Evidence upload modal
+ * ============================================================
+ */
+
+async function handleEvidenceUploadModal(
+    interaction
+) {
+
+    const parts =
+        interaction.customId.split(":");
+
+
+    const caseId =
+        parseCaseId(
+            parts[3]
+        );
+
+
+    await requirePermission(
+        interaction,
+        "evidence"
+    );
+
+
+    /*
+     * Acknowledge the modal before processing files.
+     *
+     * Storage uploads can take some time, so we defer.
+     */
+
+    await interaction.deferReply({
+        flags:
+            MessageFlags.Ephemeral
+    });
+
+
+    const caseData =
+        await caseMutationService.getCase(
+            caseId
+        );
+
+
+    if (!caseData) {
+
+        await safelyEdit(
+            interaction,
+            errorPanel(
+                `Case #${caseId} was not found.`
+            )
+        );
+
+        return;
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * Retrieve uploaded files
+     * --------------------------------------------------------
+     */
+
+    const uploadedFiles =
+        interaction.fields.getUploadedFiles(
+            "evidence_files"
+        );
+
+
+    const attachments =
+        Array.from(
+            uploadedFiles.values()
+        );
+
+
+    if (
+        attachments.length === 0
+    ) {
+
+        await safelyEdit(
+            interaction,
+            errorPanel(
+                "No evidence files were uploaded."
+            )
+        );
+
+        return;
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * Description
+     * --------------------------------------------------------
+     */
+
+    let description = "";
+
+
+    try {
+
+        description =
+            interaction.fields.getTextInputValue(
+                "evidence_description"
+            ) || "";
+
+    } catch {
+
+        description = "";
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * Upload
+     * --------------------------------------------------------
+     */
+
+    const actorId =
+        interaction.user?.id ||
+        null;
+
+
+    const actorName =
+        interaction.user?.globalName ||
+        interaction.user?.username ||
+        "Discord User";
+
+
+    let evidence;
+
+
+    try {
+
+        evidence =
+            await discordEvidenceService.uploadEvidence({
+                caseId,
+
+                attachments,
+
+                description,
+
+                actorId,
+
+                actorName
+            });
+
+    } catch (error) {
+
+        console.error(
+            "[CaseManager] Discord evidence upload failed:",
+            error
+        );
+
+
+        await safelyEdit(
+            interaction,
+            errorPanel(
+                config.bot.debug
+                    ? `Evidence upload failed: ${error.message}`
+                    : `Evidence upload failed: ${error.message}`
+            )
+        );
+
+        return;
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * Reload evidence
+     * --------------------------------------------------------
+     */
+
+    const updatedEvidence =
+        await caseMutationService.getEvidence(
+            caseId
+        );
+
+
+    const uploadedCount =
+        Array.isArray(evidence)
+            ? evidence.length
+            : 0;
+
+
+    /*
+     * --------------------------------------------------------
+     * Return to evidence panel
+     * --------------------------------------------------------
+     */
+
+    const panel =
+        caseEvidencePanel(
+            caseData,
+            updatedEvidence
+        );
+
+
+    /*
+     * Add a short success message above the panel.
+     *
+     * Components V2 doesn't require an EmbedBuilder.
+     */
+
+    if (
+        panel instanceof ContainerBuilder
+    ) {
+
+        const successText =
+            new TextDisplayBuilder()
+                .setContent(
+                    `### Evidence Added\n` +
+                    `${uploadedCount} evidence file(s) were successfully added to Case #${caseId}.`
+                );
+
+
+        const successSeparator =
+            new SeparatorBuilder()
+                .setSpacing(
+                    SeparatorSpacingSize.Small
+                );
+
+
+        panel
+            .addTextDisplayComponents(
+                successText
+            )
+            .addSeparatorComponents(
+                successSeparator
+            );
+    }
+
+
+    await safelyEdit(
+        interaction,
+        panel
+    );
+}
+
+
+/*
+ * ============================================================
+ * Case status
  * ============================================================
  */
 
@@ -728,7 +1024,9 @@ async function changeCaseStatus(
 ) {
 
     const normalizedStatus =
-        normalizeStatus(status);
+        normalizeStatus(
+            status
+        );
 
 
     if (!normalizedStatus) {
@@ -745,11 +1043,13 @@ async function changeCaseStatus(
 
 
     const actorUuid =
-        interaction.user?.id || null;
+        interaction.user?.id ||
+        null;
+
 
     const actorName =
-        interaction.user?.username ||
         interaction.user?.globalName ||
+        interaction.user?.username ||
         "Discord User";
 
 
@@ -775,12 +1075,6 @@ async function changeCaseStatus(
     }
 
 
-    /*
-     * Show the updated case status directly.
-     * Do not send a temporary success panel and then
-     * overwrite it.
-     */
-
     await safelyRespond(
         interaction,
         caseStatusPanel(
@@ -792,7 +1086,7 @@ async function changeCaseStatus(
 
 /*
  * ============================================================
- * Begin investigator assignment
+ * Investigator assignment
  * ============================================================
  */
 
@@ -821,20 +1115,17 @@ async function beginInvestigatorAssignment(
 
 
     /*
-     * Investigator assignment requires a Minecraft UUID.
+     * N7-Link integration will resolve:
      *
-     * N7-Link is responsible for the Minecraft ↔ Discord
-     * account relationship, but its final database/API
-     * contract has not yet been added to CaseManager.
+     * Discord user → linked Minecraft UUID
      *
-     * Therefore we do not guess its schema here.
+     * We intentionally do not guess its schema here.
      */
 
     await safelyRespond(
         interaction,
         infoPanel(
-            "Investigator assignment is waiting for the " +
-            "N7-Link integration. No investigator was assigned."
+            "Investigator assignment is waiting for the N7-Link integration. No investigator was assigned."
         )
     );
 }
@@ -842,7 +1133,7 @@ async function beginInvestigatorAssignment(
 
 /*
  * ============================================================
- * Begin investigator removal
+ * Investigator removal
  * ============================================================
  */
 
@@ -929,6 +1220,8 @@ async function beginInvestigatorRemoval(
             .setPlaceholder(
                 "Select an investigator to remove"
             )
+            .setMinValues(1)
+            .setMaxValues(1)
             .addOptions(
                 options
             );
@@ -944,11 +1237,11 @@ async function beginInvestigatorRemoval(
     const container =
         new ContainerBuilder()
             .addTextDisplayComponents(
-                new TextDisplayBuilder().setContent(
-                    `## Remove Investigator\n` +
-                    `Select an investigator assigned to ` +
-                    `**Case #${caseId}**.`
-                )
+                new TextDisplayBuilder()
+                    .setContent(
+                        `## Remove Investigator\n` +
+                        `Select an investigator assigned to **Case #${caseId}**.`
+                    )
             )
             .addSeparatorComponents(
                 new SeparatorBuilder()
@@ -983,12 +1276,6 @@ async function handleStringSelect(
             interaction.customId || ""
         );
 
-
-    /*
-     * --------------------------------------------------------
-     * Remove investigator
-     * --------------------------------------------------------
-     */
 
     if (
         customId.startsWith(
@@ -1030,11 +1317,13 @@ async function handleStringSelect(
 
 
         const actorUuid =
-            interaction.user?.id || null;
+            interaction.user?.id ||
+            null;
+
 
         const actorName =
-            interaction.user?.username ||
             interaction.user?.globalName ||
+            interaction.user?.username ||
             "Discord User";
 
 
@@ -1091,11 +1380,9 @@ async function handleStringSelect(
         )
     );
 }
-
-
 /*
  * ============================================================
- * Role selection
+ * Discord role selector
  * ============================================================
  */
 
@@ -1242,11 +1529,14 @@ async function handleSettingsButton(
 
 
     /*
-     * Main settings page
+     * --------------------------------------------------------
+     * Main permission settings
+     * --------------------------------------------------------
      */
 
     if (
-        customId === "settings:permissions"
+        customId ===
+        "settings:permissions"
     ) {
 
         await safelyRespond(
@@ -1261,7 +1551,9 @@ async function handleSettingsButton(
 
 
     /*
-     * Permission mode menu
+     * --------------------------------------------------------
+     * Permission mode
+     * --------------------------------------------------------
      */
 
     if (
@@ -1287,7 +1579,9 @@ async function handleSettingsButton(
 
 
     /*
-     * Permission role menu
+     * --------------------------------------------------------
+     * Permission roles
+     * --------------------------------------------------------
      */
 
     if (
@@ -1313,7 +1607,9 @@ async function handleSettingsButton(
 
 
     /*
-     * Refresh permission settings
+     * --------------------------------------------------------
+     * Refresh
+     * --------------------------------------------------------
      */
 
     if (
@@ -1338,11 +1634,14 @@ async function handleSettingsButton(
 
 
     /*
-     * Back from settings
+     * --------------------------------------------------------
+     * Back
+     * --------------------------------------------------------
      */
 
     if (
-        customId === "settings:back"
+        customId ===
+        "settings:back"
     ) {
 
         await safelyRespond(
@@ -1355,27 +1654,9 @@ async function handleSettingsButton(
 
 
     /*
-     * Back to permission settings
-     */
-
-    if (
-        customId ===
-        "settings:permissions"
-    ) {
-
-        await safelyRespond(
-            interaction,
-            permissionSettingsPanel(
-                interaction.guildId
-            )
-        );
-
-        return;
-    }
-
-
-    /*
+     * --------------------------------------------------------
      * Global mode
+     * --------------------------------------------------------
      */
 
     if (
@@ -1393,7 +1674,9 @@ async function handleSettingsButton(
 
 
     /*
+     * --------------------------------------------------------
      * Per-command mode
+     * --------------------------------------------------------
      */
 
     if (
@@ -1411,7 +1694,9 @@ async function handleSettingsButton(
 
 
     /*
-     * Role configuration
+     * --------------------------------------------------------
+     * Set role
+     * --------------------------------------------------------
      */
 
     if (
@@ -1437,7 +1722,9 @@ async function handleSettingsButton(
 
 
     /*
+     * --------------------------------------------------------
      * Clear role
+     * --------------------------------------------------------
      */
 
     if (
@@ -1473,7 +1760,7 @@ async function handleSettingsButton(
 
 /*
  * ============================================================
- * Change permission mode
+ * Update permission mode
  * ============================================================
  */
 
@@ -1607,7 +1894,7 @@ async function clearPermissionRole(
 
 /*
  * ============================================================
- * Show Discord role selector
+ * Show role selector
  * ============================================================
  */
 
@@ -1658,13 +1945,6 @@ async function showRoleSelector(
         );
 
 
-    /*
-     * The settings panel tells the user what
-     * role is being configured.
-     *
-     * We append the native Discord RoleSelectMenu.
-     */
-
     const roleSelector =
         new RoleSelectMenuBuilder()
             .setCustomId(
@@ -1710,6 +1990,8 @@ async function showRoleSelector(
         panel
     );
 }
+
+
 /*
  * ============================================================
  * Permission enforcement
@@ -1787,7 +2069,7 @@ async function requirePermission(
 
 /*
  * ============================================================
- * Permission-manager enforcement
+ * Permission manager enforcement
  * ============================================================
  */
 
@@ -1891,12 +2173,17 @@ function applyRoleSetting(
             normalizedRoleId;
     }
 }
+/*
+ * ============================================================
+ * Utility helpers
+ * ============================================================
+ */
 
 
 /*
- * ============================================================
+ * ------------------------------------------------------------
  * Parse case ID
- * ============================================================
+ * ------------------------------------------------------------
  */
 
 function parseCaseId(
@@ -1926,9 +2213,9 @@ function parseCaseId(
 
 
 /*
- * ============================================================
- * Normalize status
- * ============================================================
+ * ------------------------------------------------------------
+ * Normalize case status
+ * ------------------------------------------------------------
  */
 
 function normalizeStatus(
@@ -1968,9 +2255,9 @@ function normalizeStatus(
 
 
 /*
- * ============================================================
+ * ------------------------------------------------------------
  * Format status
- * ============================================================
+ * ------------------------------------------------------------
  */
 
 function formatStatus(
@@ -1994,9 +2281,9 @@ function formatStatus(
 
 
 /*
- * ============================================================
+ * ------------------------------------------------------------
  * Format role type
- * ============================================================
+ * ------------------------------------------------------------
  */
 
 function formatRoleType(
@@ -2024,9 +2311,9 @@ function formatRoleType(
 
 
 /*
- * ============================================================
+ * ------------------------------------------------------------
  * Truncate text
- * ============================================================
+ * ------------------------------------------------------------
  */
 
 function truncate(
@@ -2071,7 +2358,7 @@ function truncate(
 
 /*
  * ============================================================
- * Create generic select panel
+ * Generic select panel
  * ============================================================
  */
 
@@ -2120,7 +2407,7 @@ function createSelectPanel(
 
 /*
  * ============================================================
- * Safely respond
+ * Safe interaction response
  * ============================================================
  */
 
@@ -2137,18 +2424,7 @@ async function safelyRespond(
     try {
 
         if (
-            interaction.replied
-        ) {
-
-            await interaction.editReply(
-                payload
-            );
-
-            return;
-        }
-
-
-        if (
+            interaction.replied ||
             interaction.deferred
         ) {
 
@@ -2167,10 +2443,10 @@ async function safelyRespond(
     } catch (error) {
 
         /*
-         * Discord may reject a second response if the
-         * interaction was already acknowledged elsewhere.
+         * Discord:
          *
-         * Avoid throwing another error from the error handler.
+         * 10062 = Unknown interaction
+         * 40060 = Interaction already acknowledged
          */
 
         if (
@@ -2192,7 +2468,7 @@ async function safelyRespond(
 
 /*
  * ============================================================
- * Safely edit
+ * Safe interaction edit
  * ============================================================
  */
 
@@ -2233,7 +2509,7 @@ async function safelyEdit(
 
 /*
  * ============================================================
- * Internal handled-interaction error
+ * Internal interaction-handled exception
  * ============================================================
  */
 
@@ -2254,7 +2530,7 @@ class InteractionHandledError
 
 /*
  * ============================================================
- * Discord event export
+ * Main exported Discord event
  * ============================================================
  */
 
@@ -2270,11 +2546,6 @@ module.exports =
             );
 
         } catch (error) {
-
-            /*
-             * Permission handlers deliberately throw this
-             * after sending their response so execution stops.
-             */
 
             if (
                 error instanceof
