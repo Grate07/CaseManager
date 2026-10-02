@@ -1,25 +1,40 @@
 const config = require("../config");
 const database = require("../database/database");
 
+
 class PermissionService {
 
     constructor() {
 
-        this.cache = new Map();
+        this.cache =
+            new Map();
 
         this.cacheLifetime =
             60 * 1000;
     }
 
-    async getSettings(guildId) {
+
+    /*
+     * ========================================================
+     * Get settings
+     * ========================================================
+     */
+
+    async getSettings(
+        guildId
+    ) {
 
         if (!guildId) {
 
             return this.getEnvironmentDefaults();
         }
 
+
         const cached =
-            this.cache.get(guildId);
+            this.cache.get(
+                guildId
+            );
+
 
         if (
             cached &&
@@ -29,6 +44,7 @@ class PermissionService {
 
             return cached.settings;
         }
+
 
         const result =
             await database.query(
@@ -51,9 +67,13 @@ class PermissionService {
                 [guildId]
             );
 
+
         let settings;
 
-        if (result.rows.length) {
+
+        if (
+            result.rows.length
+        ) {
 
             settings =
                 this.mapDatabaseSettings(
@@ -66,16 +86,26 @@ class PermissionService {
                 this.getEnvironmentDefaults();
         }
 
+
         this.cache.set(
             guildId,
             {
                 settings,
-                loadedAt: Date.now()
+                loadedAt:
+                    Date.now()
             }
         );
 
+
         return settings;
     }
+
+
+    /*
+     * ========================================================
+     * Environment defaults
+     * ========================================================
+     */
 
     getEnvironmentDefaults() {
 
@@ -116,7 +146,16 @@ class PermissionService {
         };
     }
 
-    mapDatabaseSettings(row) {
+
+    /*
+     * ========================================================
+     * Map database row
+     * ========================================================
+     */
+
+    mapDatabaseSettings(
+        row
+    ) {
 
         return {
 
@@ -155,6 +194,13 @@ class PermissionService {
         };
     }
 
+
+    /*
+     * ========================================================
+     * Get required role
+     * ========================================================
+     */
+
     async getRequiredRoleId(
         guildId,
         commandName
@@ -164,6 +210,7 @@ class PermissionService {
             await this.getSettings(
                 guildId
             );
+
 
         if (
             settings.mode ===
@@ -176,12 +223,18 @@ class PermissionService {
             );
         }
 
+
+        const normalizedCommand =
+            String(
+                commandName || ""
+            ).toLowerCase();
+
+
         const commandRole =
             settings.perCommand[
-                String(
-                    commandName || ""
-                ).toLowerCase()
+                normalizedCommand
             ];
+
 
         if (
             commandRole &&
@@ -191,11 +244,24 @@ class PermissionService {
             return commandRole.trim();
         }
 
+
+        /*
+         * If a specific command does not have its own role,
+         * fall back to the global role.
+         */
+
         return (
             settings.globalRoleId ||
             ""
         );
     }
+
+
+    /*
+     * ========================================================
+     * Check normal command permission
+     * ========================================================
+     */
 
     async hasPermission(
         member,
@@ -203,14 +269,21 @@ class PermissionService {
     ) {
 
         if (!member) {
+
             return false;
         }
+
 
         if (!member.guild) {
+
             return false;
         }
 
-        // Server owner always has access.
+
+        /*
+         * Server owner always has access.
+         */
+
         if (
             member.guild.ownerId ===
             member.id
@@ -219,21 +292,86 @@ class PermissionService {
             return true;
         }
 
+
         const requiredRoleId =
             await this.getRequiredRoleId(
                 member.guild.id,
                 commandName
             );
 
-        // Fail closed if no role is configured.
-        if (!requiredRoleId) {
+
+        /*
+         * Fail closed.
+         */
+
+        if (
+            !requiredRoleId
+        ) {
+
             return false;
         }
+
 
         return member.roles.cache.has(
             requiredRoleId
         );
     }
+
+
+    /*
+     * ========================================================
+     * Check permission-management access
+     * ========================================================
+     *
+     * This is intentionally separate from "settings".
+     */
+
+    async canManagePermissions(
+        member
+    ) {
+
+        if (!member) {
+
+            return false;
+        }
+
+
+        if (!member.guild) {
+
+            return false;
+        }
+
+
+        /*
+         * Server owner always has access.
+         */
+
+        if (
+            member.guild.ownerId ===
+            member.id
+        ) {
+
+            return true;
+        }
+
+
+        /*
+         * Permission configuration is controlled by the
+         * "permissions" permission entry.
+         */
+
+        return this.hasPermission(
+            member,
+            "permissions"
+        );
+    }
+
+
+    /*
+     * ========================================================
+     * Save settings
+     * ========================================================
+     */
 
     async saveSettings(
         guildId,
@@ -248,11 +386,13 @@ class PermissionService {
             );
         }
 
+
         const mode =
             settings.mode ===
                 "per-command"
                 ? "per-command"
                 : "global";
+
 
         await database.query(
             `
@@ -286,6 +426,7 @@ class PermissionService {
             )
             ON CONFLICT (guild_id)
             DO UPDATE SET
+
                 permission_mode =
                     EXCLUDED.permission_mode,
 
@@ -320,6 +461,7 @@ class PermissionService {
                     CURRENT_TIMESTAMP
             `,
             [
+
                 guildId,
 
                 mode,
@@ -360,10 +502,18 @@ class PermissionService {
             ]
         );
 
+
         this.clearCache(
             guildId
         );
     }
+
+
+    /*
+     * ========================================================
+     * Permission information
+     * ========================================================
+     */
 
     async getPermissionInfo(
         guildId,
@@ -375,11 +525,13 @@ class PermissionService {
                 guildId
             );
 
+
         const roleId =
             await this.getRequiredRoleId(
                 guildId,
                 commandName
             );
+
 
         return {
 
@@ -390,7 +542,9 @@ class PermissionService {
                 roleId || null,
 
             configured:
-                Boolean(roleId),
+                Boolean(
+                    roleId
+                ),
 
             description:
                 this.getModeDescription(
@@ -398,6 +552,13 @@ class PermissionService {
                 )
         };
     }
+
+
+    /*
+     * ========================================================
+     * Validate guild configuration
+     * ========================================================
+     */
 
     async validateGuild(
         guildId
@@ -408,7 +569,9 @@ class PermissionService {
                 guildId
             );
 
+
         const errors = [];
+
 
         if (
             settings.mode ===
@@ -435,6 +598,7 @@ class PermissionService {
                         role.trim() !== ""
                 );
 
+
             if (
                 roles.length === 0 &&
                 !settings.globalRoleId
@@ -446,6 +610,7 @@ class PermissionService {
             }
         }
 
+
         return {
 
             valid:
@@ -454,6 +619,13 @@ class PermissionService {
             errors
         };
     }
+
+
+    /*
+     * ========================================================
+     * Description
+     * ========================================================
+     */
 
     getModeDescription(
         settings
@@ -473,15 +645,24 @@ class PermissionService {
                 );
             }
 
+
             return (
                 "Global mode — one role controls CaseManager."
             );
         }
 
+
         return (
             "Per-command mode — individual commands can use different roles."
         );
     }
+
+
+    /*
+     * ========================================================
+     * Clear cache
+     * ========================================================
+     */
 
     clearCache(
         guildId
@@ -500,6 +681,13 @@ class PermissionService {
     }
 }
 
+
+/*
+ * ============================================================
+ * Normalize role ID
+ * ============================================================
+ */
+
 function normalizeRoleId(
     roleId
 ) {
@@ -512,11 +700,14 @@ function normalizeRoleId(
         return null;
     }
 
+
     const value =
         roleId.trim();
 
+
     return value || null;
 }
+
 
 module.exports =
     new PermissionService();
