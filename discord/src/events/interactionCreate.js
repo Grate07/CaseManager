@@ -1,16 +1,14 @@
 const {
     MessageFlags,
-    ActionRowBuilder,
-    RoleSelectMenuBuilder,
     StringSelectMenuBuilder,
-    ContainerBuilder,
-    TextDisplayBuilder,
-    SeparatorBuilder,
-    SeparatorSpacingSize
+    StringSelectMenuOptionBuilder,
+    ActionRowBuilder,
+    RoleSelectMenuBuilder
 } = require("discord.js");
 
-const permissionService =
-    require("../permissions/permissionService");
+const config = require("../config");
+const permissionService = require("../permissions/permissionService");
+const database = require("../database/database");
 
 const caseMutationService =
     require("../services/caseMutationService");
@@ -21,10 +19,12 @@ const {
     caseTimelinePanel,
     caseStaffPanel,
     caseStatusPanel,
+    permissionPanel,
+    settingsPanel,
+    confirmationPanel,
     errorPanel,
     successPanel,
-    infoPanel,
-    settingsPanel
+    infoPanel
 } = require("../ui/components");
 
 const {
@@ -38,30 +38,68 @@ const {
 
 /*
  * ============================================================
- * CaseManager Interaction Handler
+ * CaseManager Discord — Interaction Controller
+ * ============================================================
+ *
+ * Handles:
+ *
+ *  • Slash commands
+ *  • Case buttons
+ *  • Case status controls
+ *  • Investigator controls
+ *  • Permission settings
+ *  • Role selection
+ *
+ * Discord Components V2 is used throughout.
  * ============================================================
  */
 
-module.exports = async function interactionCreate(interaction) {
+
+/*
+ * ============================================================
+ * Main interaction handler
+ * ============================================================
+ */
+
+async function handleInteraction(interaction) {
 
     try {
 
+        /*
+         * Slash commands
+         */
         if (interaction.isChatInputCommand()) {
-            await handleCommand(interaction);
+
+            await handleChatInputCommand(interaction);
             return;
         }
 
+
+        /*
+         * Buttons
+         */
         if (interaction.isButton()) {
+
             await handleButton(interaction);
             return;
         }
 
+
+        /*
+         * Normal string select menus
+         */
         if (interaction.isStringSelectMenu()) {
+
             await handleStringSelect(interaction);
             return;
         }
 
+
+        /*
+         * Discord role select menu
+         */
         if (interaction.isRoleSelectMenu()) {
+
             await handleRoleSelect(interaction);
             return;
         }
@@ -76,32 +114,22 @@ module.exports = async function interactionCreate(interaction) {
         await safelyRespond(
             interaction,
             errorPanel(
-                "An unexpected error occurred while processing this interaction."
+                config.bot.debug
+                    ? `Error: ${error.message}`
+                    : "An unexpected error occurred."
             )
         );
     }
-};
+}
 
 
 /*
  * ============================================================
- * Slash commands
+ * Slash command handling
  * ============================================================
  */
 
-async function handleCommand(interaction) {
-
-    if (!interaction.inGuild()) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "CaseManager commands can only be used inside a Discord server."
-            )
-        );
-
-        return;
-    }
+async function handleChatInputCommand(interaction) {
 
     const command =
         interaction.client.commands?.get(
@@ -113,7 +141,7 @@ async function handleCommand(interaction) {
         await safelyRespond(
             interaction,
             errorPanel(
-                "This command is not available."
+                "That command is not available."
             )
         );
 
@@ -126,41 +154,50 @@ async function handleCommand(interaction) {
 
 /*
  * ============================================================
- * Button router
+ * Button handling
  * ============================================================
  */
 
 async function handleButton(interaction) {
 
-    if (!interaction.inGuild()) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "CaseManager controls can only be used inside a Discord server."
-            )
-        );
-
-        return;
-    }
-
     const customId =
-        interaction.customId;
+        String(interaction.customId || "");
+
+
+    /*
+     * --------------------------------------------------------
+     * Case buttons
+     * --------------------------------------------------------
+     */
 
     if (customId.startsWith("case:")) {
+
         await handleCaseButton(interaction);
         return;
     }
 
+
+    /*
+     * --------------------------------------------------------
+     * Permission/settings buttons
+     * --------------------------------------------------------
+     */
+
     if (customId.startsWith("settings:")) {
+
         await handleSettingsButton(interaction);
         return;
     }
 
+
+    /*
+     * Unknown button
+     */
+
     await safelyRespond(
         interaction,
         errorPanel(
-            "Unknown CaseManager button."
+            "This button is no longer available."
         )
     );
 }
@@ -177,44 +214,40 @@ async function handleCaseButton(interaction) {
     const parts =
         interaction.customId.split(":");
 
+
+    /*
+     * Expected formats:
+     *
+     * case:view:<id>
+     * case:evidence:<id>
+     * case:evidence:add:<id>
+     * case:timeline:<id>
+     * case:investigators:<id>
+     * case:assign:<id>
+     * case:unassign:<id>
+     * case:status:<status>:<id>
+     */
+
+
     const action =
         parts[1];
 
 
     /*
      * --------------------------------------------------------
-     * VIEW
-     * case:view:<id>
+     * View
      * --------------------------------------------------------
      */
 
     if (action === "view") {
 
-        if (
-            !(await checkPermission(
-                interaction,
-                "case"
-            ))
-        ) {
-            return;
-        }
-
         const caseId =
             parseCaseId(parts[2]);
 
-        if (!caseId) {
-
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid case ID."
-                )
-            );
-
-            return;
-        }
-
-        await deferComponents(interaction);
+        await requirePermission(
+            interaction,
+            "case"
+        );
 
         await showCase(
             interaction,
@@ -227,43 +260,23 @@ async function handleCaseButton(interaction) {
 
     /*
      * --------------------------------------------------------
-     * EVIDENCE
-     * case:evidence:<id>
-     * case:evidence:add:<id>
+     * Evidence
      * --------------------------------------------------------
      */
 
     if (action === "evidence") {
-
-        if (
-            !(await checkPermission(
-                interaction,
-                "evidence"
-            ))
-        ) {
-            return;
-        }
 
         if (parts[2] === "add") {
 
             const caseId =
                 parseCaseId(parts[3]);
 
-            if (!caseId) {
+            await requirePermission(
+                interaction,
+                "evidence"
+            );
 
-                await safelyRespond(
-                    interaction,
-                    errorPanel(
-                        "Invalid case ID."
-                    )
-                );
-
-                return;
-            }
-
-            await deferComponents(interaction);
-
-            await handleAddEvidence(
+            await beginEvidenceAdd(
                 interaction,
                 caseId
             );
@@ -271,22 +284,14 @@ async function handleCaseButton(interaction) {
             return;
         }
 
+
         const caseId =
             parseCaseId(parts[2]);
 
-        if (!caseId) {
-
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid case ID."
-                )
-            );
-
-            return;
-        }
-
-        await deferComponents(interaction);
+        await requirePermission(
+            interaction,
+            "evidence"
+        );
 
         await showEvidence(
             interaction,
@@ -299,38 +304,19 @@ async function handleCaseButton(interaction) {
 
     /*
      * --------------------------------------------------------
-     * TIMELINE
-     * case:timeline:<id>
+     * Timeline
      * --------------------------------------------------------
      */
 
     if (action === "timeline") {
 
-        if (
-            !(await checkPermission(
-                interaction,
-                "timeline"
-            ))
-        ) {
-            return;
-        }
-
         const caseId =
             parseCaseId(parts[2]);
 
-        if (!caseId) {
-
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid case ID."
-                )
-            );
-
-            return;
-        }
-
-        await deferComponents(interaction);
+        await requirePermission(
+            interaction,
+            "timeline"
+        );
 
         await showTimeline(
             interaction,
@@ -343,38 +329,19 @@ async function handleCaseButton(interaction) {
 
     /*
      * --------------------------------------------------------
-     * INVESTIGATORS
-     * case:investigators:<id>
+     * Investigators
      * --------------------------------------------------------
      */
 
     if (action === "investigators") {
 
-        if (
-            !(await checkPermission(
-                interaction,
-                "investigators"
-            ))
-        ) {
-            return;
-        }
-
         const caseId =
             parseCaseId(parts[2]);
 
-        if (!caseId) {
-
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid case ID."
-                )
-            );
-
-            return;
-        }
-
-        await deferComponents(interaction);
+        await requirePermission(
+            interaction,
+            "investigators"
+        );
 
         await showInvestigators(
             interaction,
@@ -387,40 +354,21 @@ async function handleCaseButton(interaction) {
 
     /*
      * --------------------------------------------------------
-     * ASSIGN
-     * case:assign:<id>
+     * Assign investigator
      * --------------------------------------------------------
      */
 
     if (action === "assign") {
 
-        if (
-            !(await checkPermission(
-                interaction,
-                "investigators"
-            ))
-        ) {
-            return;
-        }
-
         const caseId =
             parseCaseId(parts[2]);
 
-        if (!caseId) {
+        await requirePermission(
+            interaction,
+            "investigators"
+        );
 
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid case ID."
-                )
-            );
-
-            return;
-        }
-
-        await deferComponents(interaction);
-
-        await handleAssignInvestigator(
+        await beginInvestigatorAssignment(
             interaction,
             caseId
         );
@@ -431,40 +379,21 @@ async function handleCaseButton(interaction) {
 
     /*
      * --------------------------------------------------------
-     * UNASSIGN
-     * case:unassign:<id>
+     * Unassign investigator
      * --------------------------------------------------------
      */
 
     if (action === "unassign") {
 
-        if (
-            !(await checkPermission(
-                interaction,
-                "investigators"
-            ))
-        ) {
-            return;
-        }
-
         const caseId =
             parseCaseId(parts[2]);
 
-        if (!caseId) {
+        await requirePermission(
+            interaction,
+            "investigators"
+        );
 
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid case ID."
-                )
-            );
-
-            return;
-        }
-
-        await deferComponents(interaction);
-
-        await handleUnassignInvestigator(
+        await beginInvestigatorRemoval(
             interaction,
             caseId
         );
@@ -475,61 +404,24 @@ async function handleCaseButton(interaction) {
 
     /*
      * --------------------------------------------------------
-     * STATUS
-     * case:status:<STATUS>:<id>
+     * Status
      * --------------------------------------------------------
      */
 
     if (action === "status") {
 
-        if (
-            !(await checkPermission(
-                interaction,
-                "status"
-            ))
-        ) {
-            return;
-        }
-
         const status =
-            String(parts[2] || "")
-                .trim()
-                .toUpperCase();
+            normalizeStatus(parts[2]);
 
         const caseId =
             parseCaseId(parts[3]);
 
-        if (!caseId) {
+        await requirePermission(
+            interaction,
+            "status"
+        );
 
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid case ID."
-                )
-            );
-
-            return;
-        }
-
-        if (
-            !caseMutationService.isValidStatus(
-                status
-            )
-        ) {
-
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid case status."
-                )
-            );
-
-            return;
-        }
-
-        await deferComponents(interaction);
-
-        await handleStatusChange(
+        await changeCaseStatus(
             interaction,
             caseId,
             status
@@ -550,7 +442,7 @@ async function handleCaseButton(interaction) {
 
 /*
  * ============================================================
- * Case view
+ * Show case
  * ============================================================
  */
 
@@ -585,7 +477,7 @@ async function showCase(
 
 /*
  * ============================================================
- * Evidence
+ * Show evidence
  * ============================================================
  */
 
@@ -626,41 +518,9 @@ async function showEvidence(
 }
 
 
-async function handleAddEvidence(
-    interaction,
-    caseId
-) {
-
-    const caseData =
-        await caseMutationService.getCase(
-            caseId
-        );
-
-    if (!caseData) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                `Case #${caseId} was not found.`
-            )
-        );
-
-        return;
-    }
-
-    await safelyRespond(
-        interaction,
-        infoPanel(
-            "Add Evidence",
-            `Case #${caseId} is ready for the evidence upload flow.`
-        )
-    );
-}
-
-
 /*
  * ============================================================
- * Timeline
+ * Show timeline
  * ============================================================
  */
 
@@ -703,7 +563,7 @@ async function showTimeline(
 
 /*
  * ============================================================
- * Investigators
+ * Show investigators
  * ============================================================
  */
 
@@ -746,99 +606,11 @@ async function showInvestigators(
 
 /*
  * ============================================================
- * Status mutation
+ * Evidence addition
  * ============================================================
  */
 
-async function handleStatusChange(
-    interaction,
-    caseId,
-    status
-) {
-
-    try {
-
-        const result =
-            await caseMutationService.setCaseStatus(
-                caseId,
-                status,
-                interaction.user.id,
-                getActorName(interaction)
-            );
-
-        if (!result.changed) {
-
-            await showCaseStatus(
-                interaction,
-                caseId,
-                `Case #${caseId} is already ${formatStatus(status)}.`
-            );
-
-            return;
-        }
-
-        await showCaseStatus(
-            interaction,
-            caseId,
-            `Case status changed from ${formatStatus(result.oldStatus)} to ${formatStatus(result.newStatus)}.`
-        );
-
-    } catch (error) {
-
-        console.error(
-            "[CaseManager] Status mutation error:",
-            error
-        );
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                error.message ||
-                "Failed to change the case status."
-            )
-        );
-    }
-}
-
-
-async function showCaseStatus(
-    interaction,
-    caseId,
-    message
-) {
-
-    const caseData =
-        await caseMutationService.getCase(
-            caseId
-        );
-
-    if (!caseData) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                `Case #${caseId} was not found.`
-            )
-        );
-
-        return;
-    }
-
-    await safelyRespond(
-        interaction,
-        caseStatusPanel(
-            caseData,
-            message
-        )
-    );
-}
-/*
- * ============================================================
- * Assign investigator
- * ============================================================
- */
-
-async function handleAssignInvestigator(
+async function beginEvidenceAdd(
     interaction,
     caseId
 ) {
@@ -861,29 +633,144 @@ async function handleAssignInvestigator(
     }
 
     /*
-     * N7-Link integration will resolve the Discord user to
-     * the linked Minecraft UUID/name.
-     *
-     * We intentionally do not invent the N7-Link schema.
+     * Actual Discord attachment upload will be handled
+     * separately. We deliberately do not insert incomplete
+     * evidence into the database here.
      */
 
     await safelyRespond(
         interaction,
         infoPanel(
-            "Assign Investigator",
-            `Case #${caseId} is ready for investigator assignment. The N7-Link account resolver needs to be connected before a Discord member can be converted into a Minecraft investigator UUID.`
+            "Evidence upload is not configured yet. " +
+            "The case database remains unchanged."
         )
     );
+}
+/*
+ * ============================================================
+ * Status mutation
+ * ============================================================
+ */
+
+async function changeCaseStatus(
+    interaction,
+    caseId,
+    status
+) {
+
+    const caseData =
+        await caseMutationService.getCase(
+            caseId
+        );
+
+    if (!caseData) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                `Case #${caseId} was not found.`
+            )
+        );
+
+        return;
+    }
+
+
+    if (
+        !caseMutationService.isValidStatus(
+            status
+        )
+    ) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                `Invalid case status: ${status}`
+            )
+        );
+
+        return;
+    }
+
+
+    /*
+     * Use the Discord user's identity as the
+     * actor recorded in the case timeline.
+     *
+     * Discord IDs are intentionally stored as actor
+     * identifiers here; Minecraft UUIDs remain used
+     * by Minecraft-side actions.
+     */
+
+    const actorUuid =
+        interaction.user.id;
+
+    const actorName =
+        interaction.member?.displayName ||
+        interaction.user.globalName ||
+        interaction.user.username;
+
+
+    const result =
+        await caseMutationService.setCaseStatus(
+            caseId,
+            status,
+            actorUuid,
+            actorName
+        );
+
+
+    const updatedCase =
+        await caseMutationService.getCase(
+            caseId
+        );
+
+
+    if (!result.changed) {
+
+        await safelyRespond(
+            interaction,
+            infoPanel(
+                `Case #${caseId} is already ${formatStatus(status)}.`
+            )
+        );
+
+        return;
+    }
+
+
+    await safelyRespond(
+        interaction,
+        successPanel(
+            `Case #${caseId} status changed to **${formatStatus(status)}**.`
+        )
+    );
+
+
+    /*
+     * Keep the status panel available after the mutation.
+     *
+     * We edit the interaction response rather than creating
+     * another message.
+     */
+
+    if (updatedCase) {
+
+        await safelyEdit(
+            interaction,
+            caseStatusPanel(updatedCase)
+        );
+    }
 }
 
 
 /*
  * ============================================================
- * Unassign investigator
+ * Begin investigator assignment
  * ============================================================
  */
 
-async function handleUnassignInvestigator(
+async function beginInvestigatorAssignment(
     interaction,
     caseId
 ) {
@@ -905,43 +792,81 @@ async function handleUnassignInvestigator(
         return;
     }
 
-    const investigators =
-        await caseMutationService.getInvestigators(
+
+    /*
+     * N7-Link is responsible for Minecraft ↔ Discord
+     * account linking.
+     *
+     * The exact N7-Link database/API contract has not
+     * been supplied yet, so we do NOT invent a schema.
+     *
+     * This prevents assigning arbitrary Discord users as
+     * Minecraft investigators.
+     */
+
+    await safelyRespond(
+        interaction,
+        infoPanel(
+            "Investigator assignment requires the N7-Link " +
+            "account-link lookup. The N7-Link integration " +
+            "will be connected here once its API/schema is available."
+        )
+    );
+}
+
+
+/*
+ * ============================================================
+ * Begin investigator removal
+ * ============================================================
+ */
+
+async function beginInvestigatorRemoval(
+    interaction,
+    caseId
+) {
+
+    const caseData =
+        await caseMutationService.getCase(
             caseId
         );
 
-    if (investigators.length === 0) {
+    if (!caseData) {
 
         await safelyRespond(
             interaction,
-            infoPanel(
-                "Investigators",
-                `Case #${caseId} currently has no assigned investigators.`
+            errorPanel(
+                `Case #${caseId} was not found.`
             )
         );
 
         return;
     }
 
-    const options =
-        investigators
-            .slice(0, 25)
-            .map(investigator => ({
 
-                label:
-                    truncate(
-                        investigator.investigatorName ||
-                        investigator.investigatorUuid,
-                        100
-                    ),
+    const investigators =
+        await caseMutationService.getInvestigators(
+            caseId
+        );
 
-                value:
-                    investigator.investigatorUuid,
 
-                description:
-                    "Remove this investigator from the case."
+    if (!investigators.length) {
 
-            }));
+        await safelyRespond(
+            interaction,
+            infoPanel(
+                `Case #${caseId} has no assigned investigators.`
+            )
+        );
+
+        return;
+    }
+
+
+    /*
+     * Build a String Select menu containing the
+     * currently assigned investigators.
+     */
 
     const menu =
         new StringSelectMenuBuilder()
@@ -952,18 +877,50 @@ async function handleUnassignInvestigator(
                 "Select an investigator to remove"
             )
             .setMinValues(1)
-            .setMaxValues(1)
-            .addOptions(options);
+            .setMaxValues(1);
+
+
+    for (const investigator of investigators) {
+
+        menu.addOptions(
+            new StringSelectMenuOptionBuilder()
+                .setLabel(
+                    truncate(
+                        investigator.investigatorName ||
+                        investigator.playerName ||
+                        "Unknown investigator",
+                        100
+                    )
+                )
+                .setDescription(
+                    truncate(
+                        investigator.investigatorUuid ||
+                        investigator.playerUuid ||
+                        "Unknown UUID",
+                        100
+                    )
+                )
+                .setValue(
+                    String(
+                        investigator.investigatorUuid ||
+                        investigator.playerUuid
+                    )
+                )
+        );
+    }
+
 
     const row =
         new ActionRowBuilder()
             .addComponents(menu);
 
+
     await safelyRespond(
         interaction,
-        createInvestigatorRemovalPanel(
-            caseData,
-            row
+        createSelectPanel(
+            `Remove Investigator — Case #${caseId}`,
+            "Select the investigator you want to remove.",
+            [row]
         )
     );
 }
@@ -971,7 +928,7 @@ async function handleUnassignInvestigator(
 
 /*
  * ============================================================
- * Investigator removal select
+ * String select handling
  * ============================================================
  */
 
@@ -980,130 +937,203 @@ async function handleStringSelect(
 ) {
 
     const customId =
-        interaction.customId;
+        String(interaction.customId || "");
+
+
+    /*
+     * Remove investigator
+     */
 
     if (
-        !customId.startsWith(
+        customId.startsWith(
             "case:remove-investigator:"
         )
     ) {
 
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "Unknown CaseManager selection."
-            )
-        );
+        const parts =
+            customId.split(":");
 
-        return;
-    }
+        const caseId =
+            parseCaseId(parts[2]);
 
-    if (
-        !(await checkPermission(
+        await requirePermission(
             interaction,
             "investigators"
-        ))
-    ) {
-        return;
-    }
-
-    const parts =
-        customId.split(":");
-
-    const caseId =
-        parseCaseId(parts[2]);
-
-    if (!caseId) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "Invalid case ID."
-            )
         );
 
-        return;
-    }
 
-    const investigatorUuid =
-        interaction.values?.[0];
+        const selected =
+            interaction.values?.[0];
 
-    if (!investigatorUuid) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "No investigator was selected."
-            )
-        );
-
-        return;
-    }
-
-    await deferComponents(interaction);
-
-    try {
-
-        const result =
-            await caseMutationService.removeInvestigator(
-                caseId,
-                investigatorUuid,
-                interaction.user.id,
-                getActorName(interaction)
-            );
-
-        if (!result.removed) {
+        if (!selected) {
 
             await safelyRespond(
                 interaction,
-                infoPanel(
-                    "Investigator",
-                    "That investigator is no longer assigned to this case."
+                errorPanel(
+                    "No investigator was selected."
                 )
             );
 
             return;
         }
 
-        const updatedCase =
-            await caseMutationService.getCase(
-                caseId
+
+        const actorUuid =
+            interaction.user.id;
+
+        const actorName =
+            interaction.member?.displayName ||
+            interaction.user.globalName ||
+            interaction.user.username;
+
+
+        const result =
+            await caseMutationService.removeInvestigator(
+                caseId,
+                selected,
+                actorUuid,
+                actorName
             );
 
-        const investigators =
-            await caseMutationService.getInvestigators(
-                caseId
+
+        if (!result.removed) {
+
+            await safelyRespond(
+                interaction,
+                infoPanel(
+                    "That investigator is no longer assigned to the case."
+                )
             );
+
+            return;
+        }
+
 
         await safelyRespond(
             interaction,
-            caseStaffPanel(
-                updatedCase,
-                investigators
+            successPanel(
+                `Investigator **${result.investigatorName}** was removed from Case #${caseId}.`
             )
         );
 
-    } catch (error) {
-
-        console.error(
-            "[CaseManager] Investigator removal error:",
-            error
-        );
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                error.message ||
-                "Failed to remove the investigator."
-            )
-        );
+        return;
     }
+
+
+    /*
+     * Unknown select menu
+     */
+
+    await safelyRespond(
+        interaction,
+        errorPanel(
+            "This selection is no longer available."
+        )
+    );
 }
 
 
 /*
  * ============================================================
- * Settings router
+ * Role select handling
+ * ============================================================
+ */
+
+async function handleRoleSelect(
+    interaction
+) {
+
+    const customId =
+        String(interaction.customId || "");
+
+
+    if (
+        !customId.startsWith(
+            "settings:permissions:selectrole:"
+        )
+    ) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                "This role selector is no longer available."
+            )
+        );
+
+        return;
+    }
+
+
+    /*
+     * Only the server owner or the configured
+     * permission-management role may modify roles.
+     */
+
+    await requirePermissionManager(
+        interaction
+    );
+
+
+    const roleType =
+        customId.split(":").pop();
+
+
+    const selectedRoleId =
+        interaction.roles?.first()?.id ||
+        null;
+
+
+    if (!selectedRoleId) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                "No role was selected."
+            )
+        );
+
+        return;
+    }
+
+
+    const settings =
+        await permissionService.getSettings(
+            interaction.guild.id
+        );
+
+
+    applyRoleSetting(
+        settings,
+        roleType,
+        selectedRoleId
+    );
+
+
+    await savePermissionSettings(
+        interaction.guild.id,
+        settings,
+        interaction.user.id
+    );
+
+
+    const updatedSettings =
+        await permissionService.getSettings(
+            interaction.guild.id
+        );
+
+
+    await safelyRespond(
+        interaction,
+        permissionRolesPanel(
+            updatedSettings
+        )
+    );
+}
+
+
+/*
+ * ============================================================
+ * Settings button router
  * ============================================================
  */
 
@@ -1111,75 +1141,23 @@ async function handleSettingsButton(
     interaction
 ) {
 
-    const customId =
-        interaction.customId;
+    const parts =
+        interaction.customId.split(":");
 
 
     /*
-     * Permission-management settings have their own
-     * permission check.
+     * settings:back
      */
 
     if (
-        customId === "settings:permissions" ||
-        customId.startsWith("settings:permissions:")
+        interaction.customId ===
+        "settings:back"
     ) {
 
-        const allowed =
-            await permissionService.canManagePermissions(
-                interaction.member
-            );
-
-        if (!allowed) {
-
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "You do not have permission to manage CaseManager permissions."
-                )
-            );
-
-            return;
-        }
-
-        await deferComponents(interaction);
-
-        await handlePermissionSettings(
-            interaction
-        );
-
-        return;
-    }
-
-
-    /*
-     * Normal settings use the settings permission.
-     */
-
-    const allowed =
-        await permissionService.hasPermission(
-            interaction.member,
+        await requirePermission(
+            interaction,
             "settings"
         );
-
-    if (!allowed) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "You do not have permission to access CaseManager settings."
-            )
-        );
-
-        return;
-    }
-
-    await deferComponents(interaction);
-
-
-    if (
-        customId === "settings:back"
-    ) {
 
         await safelyRespond(
             interaction,
@@ -1190,33 +1168,18 @@ async function handleSettingsButton(
     }
 
 
-    await safelyRespond(
-        interaction,
-        errorPanel(
-            "Unknown CaseManager settings action."
-        )
-    );
-}
-
-
-/*
- * ============================================================
- * Permission settings
- * ============================================================
- */
-
-async function handlePermissionSettings(
-    interaction
-) {
-
-    const customId =
-        interaction.customId;
-
+    /*
+     * settings:permissions
+     */
 
     if (
-        customId === "settings:permissions" ||
-        customId === "settings:permissions:refresh"
+        interaction.customId ===
+        "settings:permissions"
     ) {
+
+        await requirePermissionManager(
+            interaction
+        );
 
         await safelyRespond(
             interaction,
@@ -1229,9 +1192,18 @@ async function handlePermissionSettings(
     }
 
 
+    /*
+     * Permission mode screen
+     */
+
     if (
-        customId === "settings:permissions:mode"
+        interaction.customId ===
+        "settings:permissions:mode"
     ) {
+
+        await requirePermissionManager(
+            interaction
+        );
 
         const settings =
             await permissionService.getSettings(
@@ -1249,37 +1221,18 @@ async function handlePermissionSettings(
     }
 
 
+    /*
+     * Permission roles screen
+     */
+
     if (
-        customId ===
-        "settings:permissions:mode:global"
+        interaction.customId ===
+        "settings:permissions:roles"
     ) {
 
-        await changePermissionMode(
-            interaction,
-            "global"
+        await requirePermissionManager(
+            interaction
         );
-
-        return;
-    }
-
-
-    if (
-        customId ===
-        "settings:permissions:mode:per-command"
-    ) {
-
-        await changePermissionMode(
-            interaction,
-            "per-command"
-        );
-
-        return;
-    }
-
-
-    if (
-        customId === "settings:permissions:roles"
-    ) {
 
         const settings =
             await permissionService.getSettings(
@@ -1297,36 +1250,82 @@ async function handlePermissionSettings(
     }
 
 
-    const parts =
-        customId.split(":");
-
-
     /*
-     * settings:permissions:role:<type>
+     * Refresh permission settings
      */
 
     if (
-        parts[0] === "settings" &&
-        parts[1] === "permissions" &&
-        parts[2] === "role"
+        interaction.customId ===
+        "settings:permissions:refresh"
     ) {
+
+        await requirePermissionManager(
+            interaction
+        );
+
+        permissionService.clearCache(
+            interaction.guild.id
+        );
+
+        await safelyRespond(
+            interaction,
+            permissionSettingsPanel(
+                interaction.guild.id
+            )
+        );
+
+        return;
+    }
+
+
+    /*
+     * Global / per-command mode
+     */
+
+    if (
+        interaction.customId ===
+        "settings:permissions:mode:global"
+    ) {
+
+        await updatePermissionMode(
+            interaction,
+            "global"
+        );
+
+        return;
+    }
+
+
+    if (
+        interaction.customId ===
+        "settings:permissions:mode:per-command"
+    ) {
+
+        await updatePermissionMode(
+            interaction,
+            "per-command"
+        );
+
+        return;
+    }
+
+
+    /*
+     * Role selection screen
+     */
+
+    if (
+        customId.startsWith(
+            "settings:permissions:role:"
+        )
+    ) {
+
+        await requirePermissionManager(
+            interaction
+        );
 
         const roleType =
             parts[3];
-
-        if (
-            !isValidRoleType(roleType)
-        ) {
-
-            await safelyRespond(
-                interaction,
-                errorPanel(
-                    "Invalid permission role."
-                )
-            );
-
-            return;
-        }
 
         const settings =
             await permissionService.getSettings(
@@ -1346,18 +1345,25 @@ async function handlePermissionSettings(
 
 
     /*
-     * settings:permissions:setrole:<type>
+     * Clear role
      */
 
     if (
-        parts[0] === "settings" &&
-        parts[1] === "permissions" &&
-        parts[2] === "setrole"
+        customId.startsWith(
+            "settings:permissions:clearrole:"
+        )
     ) {
 
-        await showRoleSelector(
+        await requirePermissionManager(
+            interaction
+        );
+
+        const roleType =
+            parts[3];
+
+        await clearPermissionRole(
             interaction,
-            parts[3]
+            roleType
         );
 
         return;
@@ -1365,18 +1371,27 @@ async function handlePermissionSettings(
 
 
     /*
-     * settings:permissions:clearrole:<type>
+     * Set-role screen.
+     *
+     * This displays Discord's native role selector.
      */
 
     if (
-        parts[0] === "settings" &&
-        parts[1] === "permissions" &&
-        parts[2] === "clearrole"
+        customId.startsWith(
+            "settings:permissions:setrole:"
+        )
     ) {
 
-        await clearPermissionRole(
+        await requirePermissionManager(
+            interaction
+        );
+
+        const roleType =
+            parts[3];
+
+        await showRoleSelector(
             interaction,
-            parts[3]
+            roleType
         );
 
         return;
@@ -1386,7 +1401,7 @@ async function handlePermissionSettings(
     await safelyRespond(
         interaction,
         errorPanel(
-            "Unknown permission settings action."
+            "Unknown CaseManager settings action."
         )
     );
 }
@@ -1394,268 +1409,52 @@ async function handlePermissionSettings(
 
 /*
  * ============================================================
- * Change permission mode
+ * Permission mode update
  * ============================================================
  */
 
-async function changePermissionMode(
+async function updatePermissionMode(
     interaction,
     mode
 ) {
 
+    if (
+        mode !== "global" &&
+        mode !== "per-command"
+    ) {
+
+        throw new Error(
+            "Invalid permission mode."
+        );
+    }
+
+
+    await requirePermissionManager(
+        interaction
+    );
+
+
     const settings =
         await permissionService.getSettings(
             interaction.guild.id
         );
+
 
     settings.mode =
         mode;
 
-    await savePermissionSettings(
-        interaction.guild.id,
-        settings,
-        interaction.user.id
-    );
-
-    await safelyRespond(
-        interaction,
-        permissionSettingsPanel(
-            interaction.guild.id
-        )
-    );
-}
-
-
-/*
- * ============================================================
- * Role selector
- * ============================================================
- */
-
-async function showRoleSelector(
-    interaction,
-    roleType
-) {
-
-    if (
-        !isValidRoleType(roleType)
-    ) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "Invalid permission role."
-            )
-        );
-
-        return;
-    }
-
-    const settings =
-        await permissionService.getSettings(
-            interaction.guild.id
-        );
-
-    const selector =
-        new RoleSelectMenuBuilder()
-            .setCustomId(
-                `settings:permissions:selectrole:${roleType}`
-            )
-            .setPlaceholder(
-                "Select a Discord role"
-            )
-            .setMinValues(1)
-            .setMaxValues(1);
-
-    const row =
-        new ActionRowBuilder()
-            .addComponents(selector);
-
-    await safelyRespond(
-        interaction,
-        createRoleSelectorPanel(
-            roleType,
-            getRoleId(
-                roleType,
-                settings
-            ),
-            row
-        )
-    );
-}
-/*
- * ============================================================
- * Role selector interaction
- * ============================================================
- */
-
-async function handleRoleSelect(
-    interaction
-) {
-
-    if (!interaction.inGuild()) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "This control can only be used inside a Discord server."
-            )
-        );
-
-        return;
-    }
-
-
-    const allowed =
-        await permissionService.canManagePermissions(
-            interaction.member
-        );
-
-
-    if (!allowed) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "You do not have permission to manage CaseManager permissions."
-            )
-        );
-
-        return;
-    }
-
-
-    const parts =
-        interaction.customId.split(":");
-
-
-    if (
-        parts[0] !== "settings" ||
-        parts[1] !== "permissions" ||
-        parts[2] !== "selectrole"
-    ) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "Unknown permission role selector."
-            )
-        );
-
-        return;
-    }
-
-
-    const roleType =
-        parts[3];
-
-
-    if (
-        !isValidRoleType(roleType)
-    ) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "Invalid permission role."
-            )
-        );
-
-        return;
-    }
-
-
-    const roleId =
-        interaction.values?.[0];
-
-
-    if (!roleId) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "No role was selected."
-            )
-        );
-
-        return;
-    }
-
-
-    const role =
-        interaction.guild.roles.cache.get(
-            roleId
-        );
-
-
-    if (!role) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "The selected role could not be found."
-            )
-        );
-
-        return;
-    }
-
-
-    if (
-        role.id === interaction.guild.id
-    ) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "The @everyone role cannot be used as a CaseManager permission role."
-            )
-        );
-
-        return;
-    }
-
-
-    if (role.managed) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "Managed/integration roles cannot be used as CaseManager permission roles."
-            )
-        );
-
-        return;
-    }
-
-
-    const settings =
-        await permissionService.getSettings(
-            interaction.guild.id
-        );
-
-
-    if (roleType === "global") {
-
-        settings.globalRoleId =
-            role.id;
-
-    } else {
-
-        if (!settings.perCommand) {
-            settings.perCommand = {};
-        }
-
-        settings.perCommand[roleType] =
-            role.id;
-    }
-
 
     await savePermissionSettings(
         interaction.guild.id,
         settings,
         interaction.user.id
     );
+
+
+    const updatedSettings =
+        await permissionService.getSettings(
+            interaction.guild.id
+        );
 
 
     await safelyRespond(
@@ -1678,41 +1477,17 @@ async function clearPermissionRole(
     roleType
 ) {
 
-    if (
-        !isValidRoleType(roleType)
-    ) {
-
-        await safelyRespond(
-            interaction,
-            errorPanel(
-                "Invalid permission role."
-            )
-        );
-
-        return;
-    }
-
-
     const settings =
         await permissionService.getSettings(
             interaction.guild.id
         );
 
 
-    if (roleType === "global") {
-
-        settings.globalRoleId =
-            "";
-
-    } else {
-
-        if (!settings.perCommand) {
-            settings.perCommand = {};
-        }
-
-        settings.perCommand[roleType] =
-            "";
-    }
+    applyRoleSetting(
+        settings,
+        roleType,
+        ""
+    );
 
 
     await savePermissionSettings(
@@ -1722,10 +1497,16 @@ async function clearPermissionRole(
     );
 
 
+    const updatedSettings =
+        await permissionService.getSettings(
+            interaction.guild.id
+        );
+
+
     await safelyRespond(
         interaction,
-        permissionSettingsPanel(
-            interaction.guild.id
+        permissionRolesPanel(
+            updatedSettings
         )
     );
 }
@@ -1733,14 +1514,59 @@ async function clearPermissionRole(
 
 /*
  * ============================================================
- * Permission check
+ * Native Discord role selector
  * ============================================================
  */
 
-async function checkPermission(
+async function showRoleSelector(
+    interaction,
+    roleType
+) {
+
+    const menu =
+        new RoleSelectMenuBuilder()
+            .setCustomId(
+                `settings:permissions:selectrole:${roleType}`
+            )
+            .setPlaceholder(
+                "Select the CaseManager role"
+            )
+            .setMinValues(1)
+            .setMaxValues(1);
+
+
+    const row =
+        new ActionRowBuilder()
+            .addComponents(menu);
+
+
+    await safelyRespond(
+        interaction,
+        createSelectPanel(
+            "Select CaseManager Role",
+            `Choose the Discord role for **${formatRoleType(roleType)}**.`,
+            [row]
+        )
+    );
+}
+/*
+ * ============================================================
+ * Permission enforcement
+ * ============================================================
+ */
+
+async function requirePermission(
     interaction,
     commandName
 ) {
+
+    if (!interaction.inGuild()) {
+
+        throw new Error(
+            "CaseManager commands can only be used inside a Discord server."
+        );
+    }
+
 
     const allowed =
         await permissionService.hasPermission(
@@ -1749,71 +1575,217 @@ async function checkPermission(
         );
 
 
-    if (allowed) {
-        return true;
+    if (!allowed) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                "You do not have permission to perform this CaseManager action."
+            )
+        );
+
+        throw new InteractionHandledError();
     }
-
-
-    await safelyRespond(
-        interaction,
-        errorPanel(
-            `You do not have permission to use the CaseManager ${commandName} controls.`
-        )
-    );
-
-
-    return false;
 }
 
 
 /*
  * ============================================================
- * Helpers
+ * Permission-management enforcement
+ * ============================================================
+ *
+ * Permission configuration is more sensitive than ordinary
+ * CaseManager actions.
+ *
+ * The guild owner can always manage it.
+ * Otherwise the configured permissions role is required.
  * ============================================================
  */
 
-function parseCaseId(value) {
+async function requirePermissionManager(
+    interaction
+) {
 
-    const parsed =
-        Number.parseInt(
-            value,
-            10
+    if (!interaction.inGuild()) {
+
+        throw new Error(
+            "This action can only be used inside a Discord server."
         );
-
-
-    if (
-        !Number.isInteger(parsed) ||
-        parsed <= 0
-    ) {
-
-        return null;
     }
 
 
-    return parsed;
+    const allowed =
+        await permissionService.canManagePermissions(
+            interaction.member
+        );
+
+
+    if (!allowed) {
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                "Only the server owner or the configured CaseManager permission manager can change permission settings."
+            )
+        );
+
+        throw new InteractionHandledError();
+    }
 }
 
 
-function getActorName(interaction) {
+/*
+ * ============================================================
+ * Permission role mapping
+ * ============================================================
+ */
 
-    return (
-        interaction.member?.displayName ||
-        interaction.user?.globalName ||
-        interaction.user?.username ||
-        "Unknown Discord User"
-    );
+function applyRoleSetting(
+    settings,
+    roleType,
+    roleId
+) {
+
+    const normalized =
+        String(roleId || "").trim();
+
+
+    switch (
+        String(roleType || "").toLowerCase()
+    ) {
+
+        case "global":
+
+            settings.globalRoleId =
+                normalized;
+
+            break;
+
+
+        case "case":
+
+            settings.perCommand.case =
+                normalized;
+
+            break;
+
+
+        case "evidence":
+
+            settings.perCommand.evidence =
+                normalized;
+
+            break;
+
+
+        case "timeline":
+
+            settings.perCommand.timeline =
+                normalized;
+
+            break;
+
+
+        case "investigators":
+
+            settings.perCommand.investigators =
+                normalized;
+
+            break;
+
+
+        case "status":
+
+            settings.perCommand.status =
+                normalized;
+
+            break;
+
+
+        case "settings":
+
+            settings.perCommand.settings =
+                normalized;
+
+            break;
+
+
+        case "permissions":
+
+            settings.perCommand.permissions =
+                normalized;
+
+            break;
+
+
+        default:
+
+            throw new Error(
+                `Unknown permission role type: ${roleType}`
+            );
+    }
 }
 
 
-function formatStatus(status) {
+/*
+ * ============================================================
+ * Case ID validation
+ * ============================================================
+ */
+
+function parseCaseId(
+    value
+) {
+
+    const caseId =
+        Number(value);
+
+
+    if (
+        !Number.isInteger(caseId) ||
+        caseId <= 0
+    ) {
+
+        throw new Error(
+            "A valid case ID is required."
+        );
+    }
+
+
+    return caseId;
+}
+
+
+/*
+ * ============================================================
+ * Status validation
+ * ============================================================
+ */
+
+function normalizeStatus(
+    value
+) {
 
     return String(
-        status || "UNKNOWN"
+        value || ""
+    )
+        .trim()
+        .toUpperCase();
+}
+
+
+function formatStatus(
+    value
+) {
+
+    return String(
+        value || "UNKNOWN"
     )
         .replaceAll(
             "_",
             " "
         )
+        .toLowerCase()
         .replace(
             /\b\w/g,
             character =>
@@ -1822,21 +1794,83 @@ function formatStatus(status) {
 }
 
 
+/*
+ * ============================================================
+ * Role type formatting
+ * ============================================================
+ */
+
+function formatRoleType(
+    roleType
+) {
+
+    const labels = {
+
+        global:
+            "Global CaseManager",
+
+        case:
+            "Case",
+
+        evidence:
+            "Evidence",
+
+        timeline:
+            "Timeline",
+
+        investigators:
+            "Investigators",
+
+        status:
+            "Status",
+
+        settings:
+            "Settings",
+
+        permissions:
+            "Permission Management"
+    };
+
+
+    return (
+        labels[
+            String(roleType || "")
+                .toLowerCase()
+        ] ||
+        "CaseManager"
+    );
+}
+
+
+/*
+ * ============================================================
+ * Text helpers
+ * ============================================================
+ */
+
 function truncate(
     value,
     maxLength
 ) {
 
     const text =
-        String(
-            value || ""
-        );
+        String(value || "");
 
 
     if (
         text.length <= maxLength
     ) {
+
         return text;
+    }
+
+
+    if (maxLength <= 3) {
+
+        return text.slice(
+            0,
+            maxLength
+        );
     }
 
 
@@ -1850,214 +1884,75 @@ function truncate(
 }
 
 
-function isValidRoleType(roleType) {
+/*
+ * ============================================================
+ * Components V2 select panel
+ * ============================================================
+ *
+ * We keep this helper local so the interaction controller
+ * does not depend on a second UI abstraction.
+ * ============================================================
+ */
 
-    return [
-
-        "global",
-        "case",
-        "evidence",
-        "timeline",
-        "investigators",
-        "status",
-        "settings",
-        "permissions"
-
-    ].includes(
-        String(
-            roleType || ""
-        ).toLowerCase()
-    );
-}
-
-
-function getRoleId(
-    roleType,
-    settings
+function createSelectPanel(
+    title,
+    description,
+    rows
 ) {
 
-    if (
-        roleType === "global"
+    const {
+        ContainerBuilder,
+        TextDisplayBuilder,
+        SeparatorBuilder,
+        SeparatorSpacingSize
+    } = require("discord.js");
+
+
+    const container =
+        new ContainerBuilder();
+
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder()
+            .setContent(
+                `## ${title}`
+            )
+    );
+
+
+    container.addSeparatorComponents(
+        new SeparatorBuilder()
+            .setSpacing(
+                SeparatorSpacingSize.Small
+            )
+    );
+
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder()
+            .setContent(
+                description
+            )
+    );
+
+
+    for (
+        const row of rows || []
     ) {
 
-        return (
-            settings.globalRoleId ||
-            ""
+        container.addActionRowComponents(
+            row
         );
     }
 
 
-    return (
-        settings.perCommand?.[roleType] ||
-        ""
-    );
-}
-
-
-/*
- * ============================================================
- * Investigator removal panel
- * ============================================================
- */
-
-function createInvestigatorRemovalPanel(
-    caseData,
-    row
-) {
-
-    const container =
-        new ContainerBuilder();
-
-
-    container.addTextDisplayComponents(
-
-        new TextDisplayBuilder()
-            .setContent(
-                `# Remove Investigator\n` +
-                `Case #${caseData.id}\n\n` +
-                "Select the investigator you want to remove."
-            )
-
-    );
-
-
-    container.addSeparatorComponents(
-
-        new SeparatorBuilder()
-            .setSpacing(
-                SeparatorSpacingSize.Small
-            )
-
-    );
-
-
-    container.addActionRowComponents(
-        row
-    );
-
-
     return container;
 }
 
 
 /*
  * ============================================================
- * Role selector panel
- * ============================================================
- */
-
-function createRoleSelectorPanel(
-    roleType,
-    currentRole,
-    selectorRow
-) {
-
-    const names = {
-
-        global:
-            "Global CaseManager Role",
-
-        case:
-            "Case Command Role",
-
-        evidence:
-            "Evidence Command Role",
-
-        timeline:
-            "Timeline Command Role",
-
-        investigators:
-            "Investigators Command Role",
-
-        status:
-            "Status Command Role",
-
-        settings:
-            "Settings Command Role",
-
-        permissions:
-            "Permission Management Role"
-
-    };
-
-
-    const title =
-        names[roleType] ||
-        "CaseManager Role";
-
-
-    const current =
-        currentRole
-            ? `<@&${currentRole}>`
-            : "Not configured";
-
-
-    const container =
-        new ContainerBuilder();
-
-
-    container.addTextDisplayComponents(
-
-        new TextDisplayBuilder()
-            .setContent(
-                `# ${title}\n` +
-                `Current role: ${current}\n\n` +
-                "Select the Discord role you want to use."
-            )
-
-    );
-
-
-    container.addSeparatorComponents(
-
-        new SeparatorBuilder()
-            .setSpacing(
-                SeparatorSpacingSize.Small
-            )
-
-    );
-
-
-    container.addActionRowComponents(
-        selectorRow
-    );
-
-
-    return container;
-}
-
-
-/*
- * ============================================================
- * Components V2 defer
- * ============================================================
- */
-
-async function deferComponents(
-    interaction
-) {
-
-    if (
-        interaction.replied ||
-        interaction.deferred
-    ) {
-        return;
-    }
-
-
-    await interaction.deferReply({
-
-        flags:
-            MessageFlags.IsComponentsV2 |
-            MessageFlags.Ephemeral
-
-    });
-}
-
-
-/*
- * ============================================================
- * Safe Components V2 response
+ * Safe interaction response
  * ============================================================
  */
 
@@ -2066,26 +1961,15 @@ async function safelyRespond(
     panel
 ) {
 
-    if (!panel) {
-
-        panel =
-            errorPanel(
-                "No response panel was generated."
-            );
-    }
-
-
     if (
-        interaction.deferred ||
-        interaction.replied
+        interaction.replied ||
+        interaction.deferred
     ) {
 
         await interaction.editReply({
-
             components: [
                 panel
             ]
-
         });
 
         return;
@@ -2101,6 +1985,120 @@ async function safelyRespond(
         flags:
             MessageFlags.IsComponentsV2 |
             MessageFlags.Ephemeral
-
     });
 }
+
+
+/*
+ * ============================================================
+ * Safe interaction edit
+ * ============================================================
+ */
+
+async function safelyEdit(
+    interaction,
+    panel
+) {
+
+    if (
+        interaction.replied ||
+        interaction.deferred
+    ) {
+
+        await interaction.editReply({
+            components: [
+                panel
+            ]
+        });
+
+        return;
+    }
+
+
+    await interaction.reply({
+
+        components: [
+            panel
+        ],
+
+        flags:
+            MessageFlags.IsComponentsV2 |
+            MessageFlags.Ephemeral
+    });
+}
+
+
+/*
+ * ============================================================
+ * Special internal error
+ * ============================================================
+ *
+ * Used when an error has already been displayed to the user.
+ * This prevents the outer handler from attempting to send a
+ * second response.
+ * ============================================================
+ */
+
+class InteractionHandledError
+    extends Error {
+
+    constructor() {
+
+        super(
+            "Interaction has already been handled."
+        );
+
+        this.name =
+            "InteractionHandledError";
+    }
+}
+
+
+/*
+ * ============================================================
+ * Interaction event listener
+ * ============================================================
+ */
+
+module.exports = async function interactionCreate(
+    interaction
+) {
+
+    try {
+
+        await handleInteraction(
+            interaction
+        );
+
+    } catch (error) {
+
+        /*
+         * Permission helpers intentionally throw this after
+         * sending their own response.
+         */
+
+        if (
+            error instanceof
+            InteractionHandledError
+        ) {
+
+            return;
+        }
+
+
+        console.error(
+            "[CaseManager] InteractionCreate failure:",
+            error
+        );
+
+
+        await safelyRespond(
+            interaction,
+            errorPanel(
+                config.bot.debug
+                    ? `Error: ${error.message}`
+                    : "An unexpected error occurred."
+            )
+        );
+    }
+};
